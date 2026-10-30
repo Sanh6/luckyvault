@@ -1,0 +1,386 @@
+/* =====================================================================
+   LuckyVault — style.css
+   Stylesheet Module (Production Release - Mobile-First Optimized)
+   ===================================================================== */
+
+:root {
+    --bg-espresso: #1f1612;
+    --bg-card: #291d18;
+    --border-warm: rgba(246, 209, 85, 0.16);
+    --gift-pink: #d92662;
+    --gift-gold: #f6d155;
+}
+
+* {
+    box-sizing: border-box;
+    scrollbar-width: thin;
+    scrollbar-color: #533d34 #140e0b;
+}
+
+body {
+    background-color: var(--bg-espresso);
+    background-image:
+        radial-gradient(circle at 20% 20%, rgba(217, 38, 98, 0.08) 0%, transparent 45%),
+        radial-gradient(circle at 80% 75%, rgba(246, 209, 85, 0.06) 0%, transparent 50%);
+    color: #f8fafc;
+    font-family: 'Inter', sans-serif;
+    overflow-x: hidden;
+}
+
+/* Glass & Warm Card Surfaces (Enhanced with Glassmorphism Inner Border) */
+.vault-card {
+    background: linear-gradient(145deg, rgba(45, 32, 26, 0.92) 0%, rgba(28, 20, 16, 0.96) 100%);
+    border: 1px solid rgba(246, 209, 85, 0.15);
+    box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.7);
+    backdrop-filter: blur(12px);
+    border-top: 1px solid rgba(255, 255, 255, 0.15);
+    border-left: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+@media (min-width: 640px) {
+    .vault-card {
+        box-shadow: 0 20px 45px -15px rgba(0, 0, 0, 0.7);
+    }
+}
+
+.vault-card-interactive {
+    transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.vault-card-interactive:hover {
+    transform: translateY(-3px);
+    border-color: rgba(246, 209, 85, 0.4);
+    box-shadow: 0 24px 48px -12px rgba(217, 38, 98, 0.22);
+}
+
+/* Mystery Box Stage & Radial Magenta Glow */
+.mystery-stage {
+    background: radial-gradient(circle at 50% 52%, rgba(217, 38, 98, 0.42) 0%, rgba(169, 22, 73, 0.18) 36%, rgba(31, 22, 18, 0) 70%);
+    position: relative;
+}
+
+/* Floating White Sparkle Dots */
+@keyframes sparkleFloat {
+
+    0%,
+    100% {
+        transform: translateY(0px) scale(1);
+        opacity: 0.85;
+    }
+
+    50% {
+        transform: translateY(-10px) scale(1.18);
+        opacity: 1;
+    }
+}
+
+.sparkle-dot {
+    position: absolute;
+    background: #e5e5e5;
+    border-radius: 9999px;
+    box-shadow: 0 0 12px 2px rgba(255, 255, 255, 0.55);
+    animation: sparkleFloat 3.4s ease-in-out infinite;
+    pointer-events: none;
+}
+
+/* Dynamic Magic Embers for Premium Mystery Box */
+@keyframes floatEmber {
+    0% {
+        transform: translateY(0) scale(1);
+        opacity: 0;
+    }
+
+    20% {
+        opacity: 1;
+    }
+
+    80% {
+        opacity: 1;
+    }
+
+    100% {
+        transform: translateY(-100px) scale(0.5);
+        opacity: 0;
+    }
+}
+
+.ember {
+    position: absolute;
+    background: radial-gradient(circle, #fff 0%, #f6d155 40%, transparent 80%);
+    border-radius: 50%;
+    box-shadow: 0 0 15px 3px rgba(246, 209, 85, 0.8);
+    animation: floatEmber 3s ease-in infinite;
+    pointer-events: none;
+}
+
+/* Mystery Box Idle & Shake/Open Animations */
+@keyframes boxIdleFloat {
+
+    0%,
+    100% {
+        transform: translateY(0px);
+    }
+
+    50% {
+        transform: translateY(-7px);
+    }
+}
+
+@keyframes boxAnticipationShake {
+    0% {
+        transform: translate(0, 0) rotate(0deg) scale(1);
+    }
+
+    15% {
+        transform: translate(-6px, -3px) rotate(-5deg) scale(1.04);
+    }
+
+    30% {
+        transform: translate(6px, 2px) rotate(5deg) scale(1.06);
+    }
+
+    45% {
+        transform: translate(-8px, -2px) rotate(-6deg) scale(1.08);
+    }
+
+    60% {
+        transform: translate(8px, 3px) rotate(6deg) scale(1.1);
+    }
+
+    75% {
+        transform: translate(-5px, -4px) rotate(-4deg) scale(1.12);
+    }
+
+    90% {
+        transform: translate(5px, 0px) rotate(4deg) scale(1.13);
+    }
+
+    100% {
+        transform: translate(0, 0) rotate(0deg) scale(1.15);
+    }
+}
+
+@keyframes lidPopOpen {
+    0% {
+        transform: translateY(0) rotate(0deg);
+    }
+
+    60% {
+        transform: translateY(-52px) rotate(-14deg);
+    }
+
+    100% {
+        transform: translateY(-38px) rotate(-8deg);
+    }
+}
+
+@keyframes prizeBurstGlow {
+    0% {
+        transform: scale(0.5);
+        opacity: 0;
+    }
+
+    60% {
+        transform: scale(1.15);
+        opacity: 1;
+    }
+
+    100% {
+        transform: scale(1);
+        opacity: 1;
+    }
+}
+
+.gift-box-wrapper {
+    animation: boxIdleFloat 3.5s ease-in-out infinite;
+    transform-origin: center bottom;
+}
+
+.gift-box-wrapper.shaking {
+    animation: boxAnticipationShake 0.9s cubic-bezier(0.36, 0.07, 0.19, 0.97) infinite;
+}
+
+.gift-lid {
+    transition: transform 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+    transform-origin: center center;
+}
+
+.gift-box-wrapper.opened .gift-lid {
+    animation: lidPopOpen 0.65s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+
+/* Spin Wheel Container & Outer White Rim */
+.wheel-stage-container {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    filter: drop-shadow(0 10px 20px rgba(0, 0, 0, 0.75));
+}
+
+@media (min-width: 640px) {
+    .wheel-stage-container {
+        filter: drop-shadow(0 22px 38px rgba(0, 0, 0, 0.75));
+    }
+}
+
+/* Premium Metallic Rim for Wheel */
+.metallic-rim {
+    background: conic-gradient(from 0deg, #e6c27a, #fff, #c9993b, #fff, #e6c27a);
+    box-shadow: 0 0 15px rgba(246, 209, 85, 0.4), inset 0 0 10px rgba(0, 0, 0, 0.8);
+}
+
+@media (min-width: 640px) {
+    .metallic-rim {
+        box-shadow: 0 0 20px rgba(246, 209, 85, 0.4), inset 0 0 10px rgba(0, 0, 0, 0.8);
+    }
+}
+
+/* Glass Gloss Overlay for Wheel */
+.glass-gloss {
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.4) 0%, rgba(255, 255, 255, 0) 40%);
+    pointer-events: none;
+    z-index: 10;
+}
+
+/* 3D Center Hub for Wheel */
+.center-hub-3d {
+    box-shadow:
+        0 10px 20px rgba(0, 0, 0, 0.5),
+        inset 0 -4px 8px rgba(0, 0, 0, 0.2),
+        inset 0 4px 8px rgba(255, 255, 255, 0.8);
+}
+
+/* Gold Pointer Tick Animation */
+@keyframes pointerTick {
+    0% {
+        transform: translateX(-50%) rotate(0deg);
+    }
+
+    40% {
+        transform: translateX(-50%) rotate(-22deg);
+    }
+
+    100% {
+        transform: translateX(-50%) rotate(0deg);
+    }
+}
+
+.wheel-pointer-tick {
+    animation: pointerTick 0.16s ease-out;
+}
+
+/* Buttons & Glow Accents */
+.btn-gold-gradient {
+    background: linear-gradient(135deg, #fbe078 0%, #f0c330 50%, #d49b16 100%);
+    color: #1a110d;
+    font-weight: 800;
+    box-shadow: 0 6px 15px -2px rgba(240, 195, 48, 0.5), inset 0 1px 1px rgba(255, 255, 255, 0.6);
+    transition: all 0.2s ease;
+}
+
+@media (min-width: 640px) {
+    .btn-gold-gradient {
+        box-shadow: 0 8px 25px -4px rgba(240, 195, 48, 0.5), inset 0 1px 1px rgba(255, 255, 255, 0.6);
+    }
+}
+
+.btn-gold-gradient:hover:not(:disabled) {
+    transform: translateY(-2px) scale(1.01);
+    box-shadow: 0 10px 20px -4px rgba(240, 195, 48, 0.75), inset 0 1px 2px rgba(255, 255, 255, 0.8);
+}
+
+@media (min-width: 640px) {
+    .btn-gold-gradient:hover:not(:disabled) {
+        box-shadow: 0 12px 30px -4px rgba(240, 195, 48, 0.75), inset 0 1px 2px rgba(255, 255, 255, 0.8);
+    }
+}
+
+.btn-gold-gradient:active:not(:disabled) {
+    transform: translateY(1px);
+}
+
+.btn-gold-gradient:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+}
+
+.btn-pink-gradient {
+    background: linear-gradient(135deg, #f23d7a 0%, #d92662 55%, #a91649 100%);
+    color: #ffffff;
+    font-weight: 800;
+    box-shadow: 0 6px 15px -2px rgba(217, 38, 98, 0.55), inset 0 1px 1px rgba(255, 255, 255, 0.35);
+    transition: all 0.2s ease;
+}
+
+@media (min-width: 640px) {
+    .btn-pink-gradient {
+        box-shadow: 0 8px 25px -4px rgba(217, 38, 98, 0.55), inset 0 1px 1px rgba(255, 255, 255, 0.35);
+    }
+}
+
+.btn-pink-gradient:hover:not(:disabled) {
+    transform: translateY(-2px) scale(1.01);
+    box-shadow: 0 10px 20px -4px rgba(217, 38, 98, 0.8);
+}
+
+@media (min-width: 640px) {
+    .btn-pink-gradient:hover:not(:disabled) {
+        box-shadow: 0 12px 32px -4px rgba(217, 38, 98, 0.8);
+    }
+}
+
+.btn-pink-gradient:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+}
+
+/* Pulsing Glow for Primary Buttons */
+.btn-glow-gold {
+    transition: all 0.3s ease;
+}
+
+.btn-glow-gold:hover:not(:disabled) {
+    box-shadow: 0 0 15px rgba(240, 195, 48, 0.6), inset 0 1px 1px rgba(255, 255, 255, 0.8);
+}
+
+@media (min-width: 640px) {
+    .btn-glow-gold:hover:not(:disabled) {
+        box-shadow: 0 0 25px rgba(240, 195, 48, 0.6), inset 0 1px 1px rgba(255, 255, 255, 0.8);
+    }
+}
+
+.btn-glow-pink {
+    transition: all 0.3s ease;
+}
+
+.btn-glow-pink:hover:not(:disabled) {
+    box-shadow: 0 0 15px rgba(217, 38, 98, 0.6);
+}
+
+@media (min-width: 640px) {
+    .btn-glow-pink:hover:not(:disabled) {
+        box-shadow: 0 0 25px rgba(217, 38, 98, 0.6);
+    }
+}
+
+/* Confetti Particle Canvas */
+#confetti-canvas {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 100;
+}
+
+/* Fix for stat overflow on mobile */
+#stat-player-won {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: clamp(0.875rem, 4vw, 1.25rem);
+    /* Shrinks text on small screens, maxes out at 1.25rem */
+    max-width: 100%;
+}
