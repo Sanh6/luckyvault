@@ -1799,6 +1799,54 @@ app.patch('/api/admin/users/:userId/status', requireAuth, requireAdmin, async (r
     }
 });
 
+// --------------------------------------------------------------------
+// Admin: Reset a user's password → returns a one-time temp password
+// --------------------------------------------------------------------
+app.post('/api/admin/users/:userId/reset-password', requireAuth, requireAdmin, async (req, res) => {
+    try {
+        const user = await User.findOne({ userId: req.params.userId });
+        if (!user) {
+            return res.status(404).json({ message: 'User account not found.' });
+        }
+
+        // Generate a 10-char temp password (mixed case + digits, avoids ambiguous chars)
+        const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
+        const generateTemp = () => {
+            let pw = '';
+            for (let i = 0; i < 10; i++) {
+                pw += alphabet[crypto.randomInt(0, alphabet.length)];
+            }
+            return pw;
+        };
+        let tempPassword = generateTemp();
+        let attempts = 0;
+        while ((!/[A-Z]/.test(tempPassword) || !/[a-z]/.test(tempPassword) || !/[0-9]/.test(tempPassword)) && attempts < 25) {
+            tempPassword = generateTemp();
+            attempts++;
+        }
+        if (!/[A-Z]/.test(tempPassword)) tempPassword = 'A' + tempPassword.slice(1);
+        if (!/[a-z]/.test(tempPassword)) tempPassword = tempPassword.slice(0, 1) + 'a' + tempPassword.slice(2);
+        if (!/[0-9]/.test(tempPassword)) tempPassword = tempPassword.slice(0, 2) + '7' + tempPassword.slice(3);
+
+        const passwordHash = await bcrypt.hash(tempPassword, 12);
+        user.passwordHash = passwordHash;
+        await user.save();
+
+        console.log(`🔐 Admin ${req.user.email} reset password for ${user.email} (${user.userId}).`);
+
+        res.json({
+            userId: user.userId,
+            userName: user.name,
+            userEmail: user.email,
+            userPhone: user.phone,
+            tempPassword
+        });
+    } catch (err) {
+        console.error('Admin Reset Password Error:', err);
+        res.status(500).json({ message: 'Failed to reset user password.' });
+    }
+});
+
 app.post('/api/admin/recharges/:txId/approve', requireAuth, requireAdmin, async (req, res) => {
     try {
         const txDoc = await Transaction.findOneAndUpdate(
