@@ -183,7 +183,8 @@ const PlatformConfigSchema = new mongoose.Schema({
             name: String,
             label: String,
             value: Number,
-            weight: Number
+            weight: Number,
+            color: String
         }]
     },
     slotState: {
@@ -248,14 +249,14 @@ const getReferenceWheelSegments = () => [
 ];
 
 const getReferenceSlotPayouts = () => [
-    { id: 1, combo: '7️⃣ 7️⃣ 7️⃣', symbol: '7', name: 'Triple Lucky 7s', label: '₦5000', value: 5000.00, weight: 1 },
-    { id: 2, combo: '💎 💎 💎', symbol: 'DIAMOND', name: 'Triple Diamonds', label: '₦1000', value: 1000.00, weight: 2 },
-    { id: 3, combo: '🔔 🔔 🔔', symbol: 'BELL', name: 'Triple Golden Bells', label: '₦500', value: 500.00, weight: 3 },
-    { id: 4, combo: '🍉 🍉 🍉', symbol: 'MELON', name: 'Triple Melons', label: '₦300', value: 300.00, weight: 5 },
-    { id: 5, combo: '🍇 🍇 🍇', symbol: 'GRAPE', name: 'Triple Grapes', label: '₦200', value: 200.00, weight: 10 },
-    { id: 6, combo: '🍋 🍋 🍋', symbol: 'LEMON', name: 'Triple Lemons', label: '₦100', value: 100.00, weight: 15 },
-    { id: 7, combo: '🍒 🍒 🍒', symbol: 'CHERRY', name: 'Triple Cherries', label: '₦50', value: 50.00, weight: 20 },
-    { id: 8, combo: '🍒 🍋 🍇', symbol: 'MISS', name: 'No Match', label: '₦0', value: 0.00, weight: 40 }
+    { id: 1, combo: '7️⃣ 7️⃣ 7️⃣', symbol: '7', name: 'Triple Lucky 7s', label: '₦5000', value: 5000.00, weight: 1, color: '#c91429' },
+    { id: 2, combo: '💎 💎 💎', symbol: 'DIAMOND', name: 'Triple Diamonds', label: '₦1000', value: 1000.00, weight: 2, color: '#623aa2' },
+    { id: 3, combo: '🔔 🔔 🔔', symbol: 'BELL', name: 'Triple Golden Bells', label: '₦500', value: 500.00, weight: 3, color: '#1b6b6b' },
+    { id: 4, combo: '🍉 🍉 🍉', symbol: 'MELON', name: 'Triple Melons', label: '₦300', value: 300.00, weight: 5, color: '#1565c0' },
+    { id: 5, combo: '🍇 🍇 🍇', symbol: 'GRAPE', name: 'Triple Grapes', label: '₦200', value: 200.00, weight: 10, color: '#ea691c' },
+    { id: 6, combo: '🍋 🍋 🍋', symbol: 'LEMON', name: 'Triple Lemons', label: '₦100', value: 100.00, weight: 15, color: '#f0c330' },
+    { id: 7, combo: '🍒 🍒 🍒', symbol: 'CHERRY', name: 'Triple Cherries', label: '₦50', value: 50.00, weight: 20, color: '#278a3f' },
+    { id: 8, combo: '🍒 🍋 🍇', symbol: 'MISS', name: 'No Match', label: '₦0', value: 0.00, weight: 40, color: '#111111' }
 ];
 
 const getReferenceMysteryPrizes = (boostRate = 0) => {
@@ -1842,9 +1843,48 @@ app.post('/api/admin/withdrawals/:txId/approve', requireAuth, requireAdmin, asyn
             return res.status(400).json({ message: 'User does not have bank details on file. Cannot disburse.' });
         }
 
-        // NOTE: Korapay requires the 3-digit CBN bank code in the `bank` field
-        // (e.g. "033" for UBA, "058" for GTBank). Ensure users enter a valid
-        // bank code in the Bank Name field, or maintain a name→code mapping.
+        // Maintain a robust mapping for common Nigerian banks for Korapay's strict 3-digit CBN bank codes.
+        const bankCodeMap = {
+            'access bank': '044',
+            'access bank (diamond)': '063',
+            'alat by wema': '035A',
+            'ecobank': '050',
+            'ecobank nigeria': '050',
+            'fidelity bank': '070',
+            'first bank': '011',
+            'first bank of nigeria': '011',
+            'first city monument bank': '214',
+            'fcmb': '214',
+            'guaranty trust bank': '058',
+            'gtb': '058',
+            'gtbank': '058',
+            'heritage bank': '030',
+            'keystone bank': '082',
+            'kuda': '50211',
+            'kuda bank': '50211',
+            'moniepoint': '50515',
+            'moniepoint mfb': '50515',
+            'opay': '100004',
+            'palmpay': '100033',
+            'polaris bank': '076',
+            'providus bank': '101',
+            'stanbic ibtc': '221',
+            'stanbic ibtc bank': '221',
+            'standard chartered bank': '068',
+            'sterling bank': '232',
+            'suntrust bank': '100',
+            'union bank': '032',
+            'union bank of nigeria': '032',
+            'united bank for africa': '033',
+            'uba': '033',
+            'unity bank': '215',
+            'wema bank': '035',
+            'zenith bank': '057'
+        };
+
+        const providedBank = user.bankDetails.bankName.trim().toLowerCase();
+        const bankCode = bankCodeMap[providedBank] || user.bankDetails.bankName.trim();
+
         const koraResponse = await fetch('https://api.korapay.com/merchant/api/v1/transactions/disburse', {
             method: 'POST',
             headers: {
@@ -1858,7 +1898,7 @@ app.post('/api/admin/withdrawals/:txId/approve', requireAuth, requireAdmin, asyn
                     amount: txDoc.cost,
                     currency: 'NGN',
                     bank_account: {
-                        bank: user.bankDetails.bankName,
+                        bank: bankCode,
                         account_number: user.bankDetails.accountNumber
                     }
                 },
@@ -1975,7 +2015,8 @@ app.put('/api/admin/slots', requireAuth, requireAdmin, async (req, res) => {
                     name: String(p.name || refPayouts[idx]?.name || `Tier #${idx + 1}`).trim(),
                     label: String(p.label || '').trim(),
                     value: Math.max(0, Number(p.value ?? 0)),
-                    weight: Math.max(1, Number(p.weight ?? 1))
+                    weight: Math.max(1, Number(p.weight ?? 1)),
+                    color: String(p.color || refPayouts[idx]?.color || '#c91429').trim()
                 }));
             }
             if (available !== undefined) {
