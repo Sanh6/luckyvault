@@ -51,6 +51,7 @@ const ToneLoader = (() => {
 const ApiClient = (() => {
     const API_BASE = '/api';
     let authToken = localStorage.getItem('lv_jwt_token') || null;
+    let guestToken = localStorage.getItem('lv_guest_token') || null;
 
     const getReferenceWheelSegments = () => [
         { id: 1, label: '₦50', value: 50.00, color: '#c91429', weight: 15 },
@@ -109,6 +110,9 @@ const ApiClient = (() => {
         users: [],
         investmentPlans: [],
         investments: [],
+        chatMessages: [],
+        adminChatSessions: [],
+        activeAdminChatUserId: null,
         wheelConfig: {
             available: true,
             spinCost: 250.00,
@@ -160,24 +164,39 @@ const ApiClient = (() => {
     const clearSession = () => {
         authToken = null;
         localStorage.removeItem('lv_jwt_token');
+        // Guest token intentionally preserved — the visitor may still be chatting
         state.currentUser = null;
         state.users = [];
         state.transactions = [];
         state.investments = [];
+        state.chatMessages = [];
+        state.adminChatSessions = [];
+        state.activeAdminChatUserId = null;
+    };
+
+    const clearGuestSession = () => {
+        guestToken = null;
+        localStorage.removeItem('lv_guest_token');
     };
 
     const apiRequest = async (endpoint, options = {}) => {
         const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
-        if (authToken) headers['Authorization'] = `Bearer ${authToken}`;
+        const isGuestEndpoint = endpoint.startsWith('/chat/guest/');
+        const tokenToUse = authToken || (isGuestEndpoint ? guestToken : null);
+
+        if (tokenToUse) headers['Authorization'] = `Bearer ${tokenToUse}`;
 
         const response = await fetch(`${API_BASE}${endpoint}`, {
             ...options,
             headers
         });
         const data = await response.json().catch(() => ({}));
+
         if (!response.ok) {
-            if (response.status === 401 && endpoint !== '/auth/login') {
-                clearSession();
+            if (response.status === 401 &&
+                endpoint !== '/auth/login' && endpoint !== '/chat/guest/init') {
+                if (isGuestEndpoint) clearGuestSession();
+                else clearSession();
             }
             throw new Error(data.message || `Request failed (${response.status})`);
         }
@@ -339,6 +358,68 @@ const ApiClient = (() => {
             });
             applyServerState(data.state);
             return data.tx;
+        },
+
+        // Live Chat Support API
+        fetchChatMessages: async (targetUserId = null) => {
+            const query = targetUserId ? `?userId=${encodeURIComponent(targetUserId)}` : '';
+            const data = await apiRequest(`/chat/messages${query}`);
+            state.chatMessages = data.messages || [];
+            return state.chatMessages;
+        },
+
+        sendChatMessage: async (message, targetUserId = null) => {
+            const data = await apiRequest('/chat/send', {
+                method: 'POST',
+                body: JSON.stringify({ message, targetUserId })
+            });
+            return data.message;
+        },
+
+        markChatRead: async (targetUserId = null) => {
+            await apiRequest('/chat/mark-read', {
+                method: 'POST',
+                body: JSON.stringify({ targetUserId })
+            });
+        },
+
+        hasGuestToken: () => Boolean(guestToken),
+
+        initGuestChat: async (name, email) => {
+            const data = await apiRequest('/chat/guest/init', {
+                method: 'POST',
+                body: JSON.stringify({ name, email })
+            });
+            if (data.guestToken) {
+                guestToken = data.guestToken;
+                localStorage.setItem('lv_guest_token', guestToken);
+            }
+            return data;
+        },
+
+        fetchGuestMessages: async () => {
+            const data = await apiRequest('/chat/guest/messages');
+            return data.messages || [];
+        },
+
+        sendGuestMessage: async (message) => {
+            const data = await apiRequest('/chat/guest/send', {
+                method: 'POST',
+                body: JSON.stringify({ message })
+            });
+            return data.message;
+        },
+
+        markGuestRead: async () => {
+            await apiRequest('/chat/guest/mark-read', { method: 'POST' });
+        },
+
+        clearGuestSession,
+
+        fetchAdminChatSessions: async () => {
+            const data = await apiRequest('/admin/chat/sessions');
+            state.adminChatSessions = data.sessions || [];
+            return state.adminChatSessions;
         },
 
         requestWheelSpin: async () => {
@@ -872,6 +953,7 @@ const AppController = (() => {
     let isBoxOpening = false;
     let isSlotSpinning = false;
     let isPurchasingInvestment = false;
+    let chatPollInterval = null;
 
     // SVG Symbols for the 3-Reel 777 Jackpot Slot Machine
     const SLOT_SYMBOL_SVGS = {
@@ -940,6 +1022,19 @@ const AppController = (() => {
             <div class="slot-reel-item scale-105 my-0.5">${SLOT_SYMBOL_SVGS[centerSym] || SLOT_SYMBOL_SVGS['7']}</div>
             <div class="slot-reel-item opacity-75 scale-75 -mt-2">${SLOT_SYMBOL_SVGS[bottom] || SLOT_SYMBOL_SVGS['BERRY']}</div>
         `;
+    };
+
+    const calculateTotalROI = () => {
+        const freq = document.getElementById('admin-invest-frequency')?.value;
+        const cost = Number(document.getElementById('admin-invest-cost')?.value || 0);
+        const roi = Number(document.getElementById('admin-invest-roi')?.value || 0);
+        const days = Number(document.getElementById('admin-invest-duration')?.value || 0);
+        const retInput = document.getElementById('admin-invest-return');
+
+        if (freq === 'Daily' && retInput) {
+            const total = cost * (roi / 100) * days;
+            retInput.value = total.toFixed(2);
+        }
     };
 
     /**
@@ -1173,26 +1268,41 @@ const AppController = (() => {
                 <div id="admin-invest-form-container" class="hidden mb-6 p-4 bg-black/40 border border-white/10 rounded-2xl shadow-inner">
                     <input type="hidden" id="admin-invest-id" value="">
                     <h3 id="admin-invest-form-title" class="font-display font-bold text-sm text-royal-gold mb-3">Create Investment Plan</h3>
-                    <div class="grid grid-cols-1 sm:grid-cols-12 gap-3 items-end">
+                    
+                    <div class="grid grid-cols-1 sm:grid-cols-12 gap-3 items-end mb-3">
                         <div class="col-span-1 sm:col-span-3">
                             <label class="block text-[11px] uppercase font-semibold text-gray-400 mb-1">Plan Name</label>
                             <input type="text" id="admin-invest-name" placeholder="e.g. Basic Plan" class="w-full px-3 py-2 rounded-lg bg-black/60 border border-white/10 text-sm text-white focus:border-royal-gold/50 focus:outline-none">
                         </div>
                         <div class="col-span-1 sm:col-span-2">
                             <label class="block text-[11px] uppercase font-semibold text-gray-400 mb-1">Cost</label>
-                            <input type="number" id="admin-invest-cost" placeholder="1000" class="w-full px-3 py-2 rounded-lg bg-black/60 border border-white/10 text-sm text-white font-mono focus:border-royal-gold/50 focus:outline-none">
+                            <input type="number" id="admin-invest-cost" oninput="AppController.calculateTotalROI()" placeholder="1000" class="w-full px-3 py-2 rounded-lg bg-black/60 border border-white/10 text-sm text-white font-mono focus:border-royal-gold/50 focus:outline-none">
+                        </div>
+                        <div class="col-span-1 sm:col-span-3">
+                            <label class="block text-[11px] uppercase font-semibold text-gray-400 mb-1">Frequency</label>
+                            <select id="admin-invest-frequency" onchange="AppController.calculateTotalROI()" class="w-full px-3 py-2 rounded-lg bg-black/60 border border-white/10 text-sm text-white focus:border-royal-gold/50 focus:outline-none">
+                                <option value="Maturity">Maturity (Lump Sum)</option>
+                                <option value="Daily">Daily Payout</option>
+                            </select>
                         </div>
                         <div class="col-span-1 sm:col-span-2">
-                            <label class="block text-[11px] uppercase font-semibold text-gray-400 mb-1">Return Amount</label>
-                            <input type="number" id="admin-invest-return" placeholder="2000" class="w-full px-3 py-2 rounded-lg bg-black/60 border border-white/10 text-sm text-white font-mono focus:border-royal-gold/50 focus:outline-none">
+                            <label class="block text-[11px] uppercase font-semibold text-gray-400 mb-1">Daily ROI (%)</label>
+                            <input type="number" step="0.1" id="admin-invest-roi" oninput="AppController.calculateTotalROI()" placeholder="3.0" class="w-full px-3 py-2 rounded-lg bg-black/60 border border-white/10 text-sm text-white font-mono focus:border-royal-gold/50 focus:outline-none">
                         </div>
                         <div class="col-span-1 sm:col-span-2">
                             <label class="block text-[11px] uppercase font-semibold text-gray-400 mb-1">Duration (Days)</label>
-                            <input type="number" id="admin-invest-duration" placeholder="3" class="w-full px-3 py-2 rounded-lg bg-black/60 border border-white/10 text-sm text-white font-mono focus:border-royal-gold/50 focus:outline-none">
+                            <input type="number" id="admin-invest-duration" oninput="AppController.calculateTotalROI()" placeholder="3" class="w-full px-3 py-2 rounded-lg bg-black/60 border border-white/10 text-sm text-white font-mono focus:border-royal-gold/50 focus:outline-none">
                         </div>
-                        <div class="col-span-1 sm:col-span-3 flex gap-2">
+                    </div>
+                    
+                    <div class="grid grid-cols-1 sm:grid-cols-12 gap-3 items-end">
+                        <div class="col-span-1 sm:col-span-3">
+                            <label class="block text-[11px] uppercase font-semibold text-gray-400 mb-1">Return Amount</label>
+                            <input type="number" id="admin-invest-return" placeholder="2000" class="w-full px-3 py-2 rounded-lg bg-black/60 border border-white/10 text-sm text-white font-mono focus:border-royal-gold/50 focus:outline-none">
+                        </div>
+                        <div class="col-span-1 sm:col-span-9 flex gap-2">
                             <button onclick="AppController.saveAdminInvestPlan()" class="flex-1 py-2 rounded-lg bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-xs font-bold hover:bg-emerald-500/30 transition">Save</button>
-                            <button onclick="AppController.hideAdminInvestForm()" class="px-3 py-2 rounded-lg bg-espresso-800 text-stone-300 border border-white/10 text-xs font-bold hover:bg-espresso-700 transition">Cancel</button>
+                            <button onclick="AppController.hideAdminInvestForm()" class="px-5 py-2 rounded-lg bg-espresso-800 text-stone-300 border border-white/10 text-xs font-bold hover:bg-espresso-700 transition">Cancel</button>
                         </div>
                     </div>
                 </div>
@@ -1214,6 +1324,101 @@ const AppController = (() => {
                 </div>
             `;
             mainAdmin.appendChild(adminInvestSec);
+        }
+    };
+
+    /**
+     * Ensures the DOM for the Admin Chat Interface exists and binds events.
+     */
+    const ensureAdminChatDOM = () => {
+        const anavSettings = document.getElementById('anav-settings');
+        if (anavSettings && !document.getElementById('anav-chat')) {
+            const adminChatBtn = document.createElement('button');
+            adminChatBtn.id = 'anav-chat';
+            adminChatBtn.setAttribute('onclick', "AppController.switchAdminTab('chat')");
+            adminChatBtn.className = 'px-3.5 py-2 rounded-xl text-xs sm:text-sm font-semibold transition text-gray-400 hover:bg-espresso-800 hover:text-white whitespace-nowrap';
+            adminChatBtn.innerHTML = `<i class="fa-solid fa-headset mr-1"></i> Live Chat`;
+            anavSettings.insertAdjacentElement('beforebegin', adminChatBtn);
+        }
+
+        const mainAdmin = document.getElementById('admin-tab-settings')?.parentNode;
+        if (mainAdmin && !document.getElementById('admin-tab-chat')) {
+            const adminChatSec = document.createElement('section');
+            adminChatSec.id = 'admin-tab-chat';
+            adminChatSec.className = 'vault-card rounded-3xl p-4 sm:p-6 hidden h-[600px] flex-col';
+            adminChatSec.innerHTML = `
+                <div class="flex items-center justify-between mb-4">
+                    <div>
+                        <h2 class="font-display font-extrabold text-xl text-white">Live Support</h2>
+                        <p class="text-xs text-gray-400 mt-1">Manage user conversations.</p>
+                    </div>
+                </div>
+                <div class="flex-1 flex flex-col sm:flex-row gap-4 h-full overflow-hidden">
+                    <!-- Left: Sessions -->
+                    <div class="w-full sm:w-1/3 bg-black/40 border border-white/10 rounded-2xl flex flex-col overflow-hidden shadow-inner">
+                        <div class="p-3 border-b border-white/10 bg-espresso-950">
+                            <h3 class="font-bold text-sm text-gray-300">Active Chats</h3>
+                        </div>
+                        <div id="admin-chat-sessions-list" class="flex-1 overflow-y-auto p-2 space-y-2">
+                            <!-- Sessions populated here -->
+                        </div>
+                    </div>
+                    <!-- Right: Chat Window -->
+                    <div class="w-full sm:w-2/3 bg-black/40 border border-white/10 rounded-2xl flex flex-col overflow-hidden shadow-inner relative">
+                        <div id="admin-chat-header" class="p-4 border-b border-white/10 bg-espresso-950 flex items-center justify-between">
+                            <span class="font-bold text-sm text-gray-400">Select a chat to begin</span>
+                        </div>
+                        <div id="admin-chat-body" class="flex-1 overflow-y-auto p-4 flex flex-col gap-4">
+                            <!-- Messages here -->
+                        </div>
+                        <div class="p-3 bg-espresso-950 border-t border-white/10 flex items-center gap-2">
+                            <input type="text" id="admin-chat-input" disabled placeholder="Type a reply..." class="flex-1 bg-[#111111] border border-white/20 rounded-xl px-3.5 py-2.5 text-xs text-white font-medium focus:outline-none focus:border-royal-gold transition shadow-inner disabled:opacity-50 placeholder-gray-500">
+                            <button type="button" id="btn-admin-chat-send" disabled onclick="AppController.sendAdminChatMessage()" class="w-10 h-10 rounded-xl btn-gold-gradient flex items-center justify-center shrink-0 text-black shadow-md transition-transform disabled:opacity-50 hover:scale-105">
+                                <i class="fa-solid fa-paper-plane text-xs"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `;
+            mainAdmin.appendChild(adminChatSec);
+
+            const adminInput = document.getElementById('admin-chat-input');
+            if (adminInput) {
+                adminInput.addEventListener('keypress', (e) => {
+                    if (e.key === 'Enter') AppController.sendAdminChatMessage();
+                });
+            }
+        }
+    };
+
+    /**
+     * Binds events to the player chat widget.
+     */
+    const setupPlayerChatWidget = () => {
+        const chatWin = document.getElementById('live-chat-window');
+        if (!chatWin || chatWin.dataset.initialized === 'true') return;
+        chatWin.dataset.initialized = 'true';
+
+        const input = document.getElementById('player-chat-input');
+        const btn = document.getElementById('btn-player-chat-send');
+
+        if (btn) btn.addEventListener('click', () => sendPlayerChatMessage());
+        if (input) input.addEventListener('keypress', (e) => { if (e.key === 'Enter') sendPlayerChatMessage(); });
+
+        // Whenever the widget is opened, refresh the correct view
+        const widget = document.getElementById('live-chat-widget');
+        if (widget) {
+            widget.querySelectorAll('button[onclick*="toggle"]').forEach((b) => {
+                b.removeAttribute('onclick');
+                b.addEventListener('click', () => {
+                    chatWin.classList.toggle('hidden');
+                    if (!chatWin.classList.contains('hidden')) loadPlayerChat();
+                });
+            });
+            widget.querySelectorAll('button[onclick*="add(\'hidden\')"]').forEach((b) => {
+                b.removeAttribute('onclick');
+                b.addEventListener('click', () => chatWin.classList.add('hidden'));
+            });
         }
     };
 
@@ -1698,10 +1903,18 @@ const AppController = (() => {
     const syncAllViews = () => {
         ensureSlotMachineDOM();
         ensureInvestmentDOM();
+        ensureAdminChatDOM();
+        setupPlayerChatWidget();
 
         const state = ApiClient.getState();
         const curr = state.settings.currency || '₦';
         const user = state.currentUser;
+
+        // Hide/Show Chat Widget Based on View
+        const chatWidget = document.getElementById('live-chat-widget');
+        if (chatWidget) {
+            chatWidget.style.display = currentMainView === 'admin' ? 'none' : 'flex';
+        }
 
         const maintBanner = document.getElementById('maintenance-banner');
         if (maintBanner) {
@@ -1913,8 +2126,7 @@ const AppController = (() => {
             renderAdminPortal();
         }
     };
-
-    let countdownInterval = null; // Add this near the top of AppController with your other variables
+    let countdownInterval = null;
 
     const startInvestmentCountdowns = () => {
         if (countdownInterval) clearInterval(countdownInterval);
@@ -1949,7 +2161,7 @@ const AppController = (() => {
             });
         };
 
-        updateTimers(); // Initial call to avoid 1-second delay
+        updateTimers();
         countdownInterval = setInterval(updateTimers, 1000);
     };
 
@@ -1958,7 +2170,6 @@ const AppController = (() => {
         const curr = state.settings.currency || '₦';
         const isMaint = state.settings.maintenanceMode;
 
-        // Player: Available Plans Grid
         const grid = document.getElementById('invest-plans-grid');
         if (grid) {
             const activePlans = (state.investmentPlans || []).filter(p => p.isActive);
@@ -1967,12 +2178,16 @@ const AppController = (() => {
             } else {
                 grid.innerHTML = activePlans.map(plan => {
                     const profitPercentage = (((plan.returnAmount - plan.cost) / plan.cost) * 100).toFixed(0);
+                    const roiBadge = plan.payoutFrequency === 'Daily'
+                        ? `<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 whitespace-nowrap">${plan.dailyRoiPercentage}% Daily ROI</span>`
+                        : `<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 whitespace-nowrap">+${profitPercentage}% ROI</span>`;
+
                     return `
                         <div class="bg-black/40 border border-white/10 rounded-2xl p-5 flex flex-col justify-between shadow-inner">
                             <div class="mb-4">
                                 <div class="flex items-center justify-between mb-2">
                                     <h3 class="font-display font-bold text-white text-base truncate pr-2">${plan.name}</h3>
-                                    <span class="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 whitespace-nowrap">+${profitPercentage}% ROI</span>
+                                    ${roiBadge}
                                 </div>
                                 <div class="flex flex-col gap-1.5">
                                     <div class="flex justify-between items-center text-xs">
@@ -2000,7 +2215,6 @@ const AppController = (() => {
             }
         }
 
-        // Player: User Investments Portfolio Table
         const portTbody = document.getElementById('invest-portfolio-tbody');
         if (portTbody) {
             const userInvests = (state.investments || []).filter(inv => inv.userId === state.currentUser?.id);
@@ -2009,9 +2223,14 @@ const AppController = (() => {
             } else {
                 portTbody.innerHTML = userInvests.map(inv => {
                     const isCompleted = inv.status === 'Completed';
-                    const dateContent = isCompleted
-                        ? `<span class="text-emerald-400 font-bold">Paid Out</span>`
-                        : `<span class="investment-countdown font-mono text-amber-400 font-bold" data-maturity="${inv.maturityDate}">Loading...</span>`;
+                    let dateContent = '';
+                    if (isCompleted) {
+                        dateContent = `<span class="text-emerald-400 font-bold">Completed</span>`;
+                    } else if (inv.payoutFrequency === 'Daily') {
+                        dateContent = `<span class="text-amber-400 font-bold">${inv.completedPayouts}/${inv.durationDays} Payouts</span>`;
+                    } else {
+                        dateContent = `<span class="investment-countdown font-mono text-amber-400 font-bold" data-maturity="${inv.maturityDate}">Loading...</span>`;
+                    }
 
                     return `
                         <tr class="hover:bg-white/[0.02] transition">
@@ -2201,7 +2420,7 @@ const AppController = (() => {
                 <tr class="hover:bg-white/[0.02]">
                     <td class="py-3 px-4">
                         <div class="font-bold text-white text-sm">${plan.name}</div>
-                        <div class="text-[10px] font-mono text-stone-500">${plan.id}</div>
+                        <div class="text-[10px] font-mono text-stone-500">${plan.id} &bull; ${plan.payoutFrequency || 'Maturity'}</div>
                     </td>
                     <td class="py-3 px-4 font-mono text-xs text-white">${curr}${Number(plan.cost).toFixed(2)}</td>
                     <td class="py-3 px-4">
@@ -2229,6 +2448,8 @@ const AppController = (() => {
         document.getElementById('admin-invest-id').value = '';
         document.getElementById('admin-invest-name').value = '';
         document.getElementById('admin-invest-cost').value = '';
+        document.getElementById('admin-invest-frequency').value = 'Maturity';
+        document.getElementById('admin-invest-roi').value = '0';
         document.getElementById('admin-invest-return').value = '';
         document.getElementById('admin-invest-duration').value = '';
         document.getElementById('admin-invest-form-title').textContent = 'Create Investment Plan';
@@ -2249,6 +2470,8 @@ const AppController = (() => {
         document.getElementById('admin-invest-id').value = plan.id;
         document.getElementById('admin-invest-name').value = plan.name;
         document.getElementById('admin-invest-cost').value = plan.cost;
+        document.getElementById('admin-invest-frequency').value = plan.payoutFrequency || 'Maturity';
+        document.getElementById('admin-invest-roi').value = plan.dailyRoiPercentage || 0;
         document.getElementById('admin-invest-return').value = plan.returnAmount;
         document.getElementById('admin-invest-duration').value = plan.durationDays;
     };
@@ -2257,6 +2480,8 @@ const AppController = (() => {
         const planId = document.getElementById('admin-invest-id').value;
         const name = document.getElementById('admin-invest-name').value;
         const cost = document.getElementById('admin-invest-cost').value;
+        const payoutFrequency = document.getElementById('admin-invest-frequency').value;
+        const dailyRoiPercentage = document.getElementById('admin-invest-roi').value;
         const returnAmount = document.getElementById('admin-invest-return').value;
         const durationDays = document.getElementById('admin-invest-duration').value;
 
@@ -2268,6 +2493,8 @@ const AppController = (() => {
         const payload = {
             name,
             cost: Number(cost),
+            payoutFrequency,
+            dailyRoiPercentage: Number(dailyRoiPercentage),
             returnAmount: Number(returnAmount),
             durationDays: Number(durationDays),
             isActive: true
@@ -2553,6 +2780,253 @@ const AppController = (() => {
         `).join('');
     };
 
+    const formatMessageTime = (dateStr) => {
+        const d = new Date(dateStr);
+        return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    };
+
+    const renderChatMessages = (containerId, messages, viewerRole) => {
+        const container = document.getElementById(containerId);
+        if (!container) return;
+
+        if (messages.length === 0) {
+            container.innerHTML = `<div class="text-center text-xs text-gray-500 mt-4">No messages yet. Send a message to start the conversation!</div>`;
+            return;
+        }
+
+        const currentMsgCount = container.dataset.msgCount || 0;
+
+        container.innerHTML = messages.map(msg => {
+            const isMine = msg.senderRole === viewerRole;
+            const safeMsg = msg.message.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+            if (isMine) {
+                return `
+                    <div class="flex items-start gap-2.5 justify-end">
+                        <div class="flex flex-col items-end">
+                            <div class="bg-royal-gold border border-yellow-400 rounded-2xl rounded-tr-sm p-3 text-xs text-espresso-950 font-medium max-w-[80%] leading-relaxed shadow-md mb-1 break-words">
+                                ${safeMsg}
+                            </div>
+                            <span class="text-[9px] text-gray-500">${formatMessageTime(msg.createdAt)}</span>
+                        </div>
+                    </div>
+                `;
+            } else {
+                const avatar = msg.senderRole === 'admin'
+                    ? `<div class="w-7 h-7 rounded-full bg-royal-gold/20 flex items-center justify-center shrink-0 border border-royal-gold/30 shadow-inner"><i class="fa-solid fa-user-tie text-[10px] text-royal-gold"></i></div>`
+                    : `<div class="w-7 h-7 rounded-full bg-espresso-800 flex items-center justify-center shrink-0 border border-white/10 shadow-inner"><i class="fa-solid fa-user text-[10px] ${msg.senderRole === 'guest' ? 'text-royal-pink' : 'text-stone-400'}"></i></div>`;
+                const roleSuffix = msg.senderRole === 'guest' ? ' <span class="text-royal-pink font-semibold">GUEST</span>' : '';
+
+                return `
+                    <div class="flex items-start gap-2.5">
+                        ${avatar}
+                        <div class="flex flex-col items-start">
+                            <div class="bg-espresso-800 border border-white/10 rounded-2xl rounded-tl-sm p-3 text-xs text-gray-200 max-w-[80%] leading-relaxed shadow-md mb-1 break-words">
+                                ${safeMsg}
+                            </div>
+                            <span class="text-[9px] text-gray-500">${msg.senderName}${roleSuffix} • ${formatMessageTime(msg.createdAt)}</span>
+                        </div>
+                    </div>
+                `;
+            }
+        }).join('');
+
+        if (messages.length > currentMsgCount) {
+            container.scrollTop = container.scrollHeight;
+            container.dataset.msgCount = messages.length;
+        }
+    };
+
+    const loadPlayerChat = async () => {
+        const formView = document.getElementById('chat-guest-form-view');
+        const mainView = document.getElementById('chat-main-view');
+
+        // No identity yet → show onboarding form
+        if (!ApiClient.hasToken() && !ApiClient.hasGuestToken()) {
+            if (formView) formView.style.display = 'flex';
+            if (mainView) mainView.style.display = 'none';
+            return;
+        }
+
+        try {
+            if (ApiClient.hasToken()) {
+                const msgs = await ApiClient.fetchChatMessages();
+                renderChatMessages('player-chat-body', msgs, 'player');
+                await ApiClient.markChatRead();
+            } else {
+                const msgs = await ApiClient.fetchGuestMessages();
+                renderChatMessages('player-chat-body', msgs, 'guest');
+                await ApiClient.markGuestRead();
+            }
+            if (formView) formView.style.display = 'none';
+            if (mainView) mainView.style.display = 'flex';
+        } catch (err) {
+            if (!ApiClient.hasToken() && ApiClient.hasGuestToken()) {
+                ApiClient.clearGuestSession();
+                if (formView) formView.style.display = 'flex';
+                if (mainView) mainView.style.display = 'none';
+            }
+        }
+    };
+
+    const sendPlayerChatMessage = async () => {
+        const input = document.getElementById('player-chat-input');
+        if (!input || !input.value.trim()) return;
+
+        if (!ApiClient.hasToken() && !ApiClient.hasGuestToken()) {
+            showToast('Please share your details to start chatting.', 'error');
+            return;
+        }
+
+        const msg = input.value.trim();
+        input.value = '';
+        try {
+            if (ApiClient.hasToken()) await ApiClient.sendChatMessage(msg);
+            else await ApiClient.sendGuestMessage(msg);
+            await loadPlayerChat();
+        } catch (e) {
+            showToast(e.message, 'error');
+        }
+    };
+
+    const handleGuestChatSubmit = async (e) => {
+        if (e) e.preventDefault();
+        const nameInput = document.getElementById('guest-chat-name');
+        const emailInput = document.getElementById('guest-chat-email');
+        const errName = document.getElementById('err-guest-name');
+        const errEmail = document.getElementById('err-guest-email');
+        const btn = document.getElementById('btn-guest-chat-start');
+
+        const name = (nameInput?.value || '').trim();
+        const email = (emailInput?.value || '').trim();
+        let ok = true;
+
+        if (!name) {
+            if (errName) { errName.textContent = 'Please enter your full name.'; errName.classList.remove('hidden'); }
+            ok = false;
+        } else if (errName) errName.classList.add('hidden');
+
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+            if (errEmail) { errEmail.textContent = 'Please enter a valid email address.'; errEmail.classList.remove('hidden'); }
+            ok = false;
+        } else if (errEmail) errEmail.classList.add('hidden');
+
+        if (!ok) return;
+
+        try {
+            if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Starting...'; }
+            await ApiClient.initGuestChat(name, email);
+            showToast('Chat started! Our team will respond shortly.', 'success');
+            await loadPlayerChat();
+        } catch (err) {
+            showToast(err.message, 'error');
+        } finally {
+            if (btn) {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fa-solid fa-paper-plane text-xs"></i><span>Start Chat</span>';
+            }
+        }
+    };
+
+    const loadAdminChatSessions = async () => {
+        const sessions = await ApiClient.fetchAdminChatSessions();
+        const list = document.getElementById('admin-chat-sessions-list');
+        if (!list) return;
+        if (sessions.length === 0) {
+            list.innerHTML = `<div class="text-center text-xs text-gray-500 p-4">No active conversations.</div>`;
+            return;
+        }
+        list.innerHTML = sessions.map((s) => {
+            const isSelected = ApiClient.getState().activeAdminChatUserId === s.userId;
+            const guestBadge = s.isGuest
+                ? '<span class="ml-1 text-[8px] px-1.5 py-0.5 rounded bg-royal-pink/20 text-pink-300 border border-royal-pink/30 align-middle">GUEST</span>'
+                : '';
+            return `
+                <button onclick="AppController.selectAdminChatSession('${s.userId}', '${s.userName.replace(/'/g, "\\'")}')"
+                    class="w-full text-left p-3 rounded-xl transition ${isSelected ? 'bg-royal-gold/10 border border-royal-gold/30' : 'hover:bg-white/5 border border-transparent'} flex items-center justify-between">
+                    <div class="overflow-hidden pr-2">
+                        <div class="font-bold text-xs text-white truncate">${s.userName}${guestBadge}</div>
+                        <div class="text-[10px] text-gray-400 truncate mt-0.5">${s.userEmail || s.lastMessage || ''}</div>
+                    </div>
+                    ${s.unreadCount > 0 ? `<div class="w-5 h-5 rounded-full bg-rose-500 flex items-center justify-center text-[10px] font-bold text-white shrink-0 shadow-lg">${s.unreadCount}</div>` : ''}
+                </button>
+            `;
+        }).join('');
+    };
+
+    const selectAdminChatSession = async (userId, userName) => {
+        ApiClient.getState().activeAdminChatUserId = userId;
+        const header = document.getElementById('admin-chat-header');
+        const input = document.getElementById('admin-chat-input');
+        const btn = document.getElementById('btn-admin-chat-send');
+        const session = (ApiClient.getState().adminChatSessions || []).find((s) => s.userId === userId);
+
+        if (header) {
+            const guestBadge = session?.isGuest
+                ? '<span class="ml-2 text-[9px] px-1.5 py-0.5 rounded bg-royal-pink/20 text-pink-300">GUEST</span>'
+                : '';
+            header.innerHTML = `
+                <div class="flex flex-col">
+                    <span class="font-bold text-sm text-white">${userName}${guestBadge}</span>
+                    ${session?.userEmail ? `<span class="text-[10px] text-gray-400">${session.userEmail}</span>` : ''}
+                </div>`;
+        }
+
+        if (input) { input.disabled = false; input.classList.add('chat-input-field'); }
+        if (btn) btn.disabled = false;
+
+        await loadAdminChatMessages();
+        await loadAdminChatSessions();
+    };
+
+    const loadAdminChatMessages = async () => {
+        const userId = ApiClient.getState().activeAdminChatUserId;
+        if (!userId) return;
+        const msgs = await ApiClient.fetchChatMessages(userId);
+        renderChatMessages('admin-chat-body', msgs, 'admin');
+        await ApiClient.markChatRead(userId);
+    };
+
+    const sendAdminChatMessage = async () => {
+        const userId = ApiClient.getState().activeAdminChatUserId;
+        if (!userId) return;
+        const input = document.getElementById('admin-chat-input');
+        if (!input || !input.value.trim()) return;
+        const msg = input.value.trim();
+        input.value = '';
+        try {
+            await ApiClient.sendChatMessage(msg, userId);
+            await loadAdminChatMessages();
+            await loadAdminChatSessions();
+        } catch (e) {
+            showToast(e.message, 'error');
+        }
+    };
+
+    const startChatPolling = () => {
+        if (chatPollInterval) clearInterval(chatPollInterval);
+        chatPollInterval = setInterval(async () => {
+            const hasIdentity = ApiClient.hasToken() || ApiClient.hasGuestToken();
+            const state = ApiClient.getState();
+
+            if (state.currentUser?.role === 'admin' && currentMainView === 'admin') {
+                const adminTabChat = document.getElementById('admin-tab-chat');
+                if (adminTabChat && !adminTabChat.classList.contains('hidden')) {
+                    await loadAdminChatSessions();
+                    if (state.activeAdminChatUserId) await loadAdminChatMessages();
+                }
+            }
+
+            const win = document.getElementById('live-chat-window');
+            const formView = document.getElementById('chat-guest-form-view');
+            const isFormVisible = formView && formView.style.display === 'flex';
+
+            if (hasIdentity && win && !win.classList.contains('hidden') && !isFormVisible) {
+                try { await loadPlayerChat(); } catch (_) { }
+            }
+        }, 3000);
+    };
+
     const switchMainView = (view) => {
         const user = ApiClient.getState().currentUser;
         if ((view === 'player' || view === 'admin') && !user) {
@@ -2606,7 +3080,7 @@ const AppController = (() => {
             if (historySec) historySec.classList.add('hidden');
             if (investSec) investSec.classList.add('hidden');
         } else if (sec === 'invest') {
-            arenaGrid.classList.remove('hidden'); // Ensure parent grid remains visible
+            arenaGrid.classList.remove('hidden');
             if (historySec) historySec.classList.add('hidden');
             if (investSec) {
                 investSec.classList.remove('hidden');
@@ -2651,7 +3125,8 @@ const AppController = (() => {
 
     const switchAdminTab = (tab) => {
         ensureInvestmentDOM();
-        const tabs = ['overview', 'users', 'wallets', 'withdrawals', 'wheel', 'mystery', 'prizes', 'transactions', 'settings', 'investments'];
+        ensureAdminChatDOM();
+        const tabs = ['overview', 'users', 'wallets', 'withdrawals', 'wheel', 'mystery', 'prizes', 'transactions', 'settings', 'investments', 'chat'];
         tabs.forEach(t => {
             const sec = document.getElementById(`admin-tab-${t}`);
             const btn = document.getElementById(`anav-${t}`);
@@ -2667,6 +3142,9 @@ const AppController = (() => {
             }
         });
         syncAllViews();
+        if (tab === 'chat') {
+            loadAdminChatSessions().catch(() => { });
+        }
     };
 
     const switchAuthTab = (tab) => {
@@ -3169,6 +3647,8 @@ const AppController = (() => {
         init: async () => {
             ensureSlotMachineDOM();
             ensureInvestmentDOM();
+            ensureAdminChatDOM();
+            setupPlayerChatWidget();
             window.addEventListener('resize', drawFortuneWheel);
 
             ToneLoader.load().catch(() => { });
@@ -3189,17 +3669,23 @@ const AppController = (() => {
                 console.warn('Could not load public config:', e.message);
             }
 
+            // Show the correct chat view based on stored credentials
+            loadPlayerChat().catch(() => { });
+
             if (ApiClient.hasToken()) {
                 try {
                     const state = await ApiClient.fetchInitialState();
                     switchMainView(state.currentUser?.role === 'admin' ? 'admin' : 'player');
+                    startChatPolling();
                     return;
                 } catch (err) {
                     ApiClient.clearSession();
                 }
             }
             switchMainView('auth');
+            startChatPolling();
         },
+        calculateTotalROI,
         switchMainView,
         switchPlayerSection,
         switchAdminTab,
@@ -3246,7 +3732,12 @@ const AppController = (() => {
         showToast,
         renderAdminUsers,
         renderAdminTransactions,
-        renderAdminWithdrawals
+        renderAdminWithdrawals,
+        loadPlayerChat,
+        sendPlayerChatMessage,
+        handleGuestChatSubmit,
+        selectAdminChatSession,
+        sendAdminChatMessage
     };
 })();
 

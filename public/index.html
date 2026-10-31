@@ -1499,7 +1499,8 @@
                     <input type="hidden" id="admin-invest-id" value="">
                     <h3 id="admin-invest-form-title" class="font-display font-bold text-sm text-royal-gold mb-3">Create
                         Investment Plan</h3>
-                    <div class="grid grid-cols-1 sm:grid-cols-12 gap-3 items-end">
+
+                    <div class="grid grid-cols-1 sm:grid-cols-12 gap-3 items-end mb-3">
                         <div class="col-span-1 sm:col-span-3">
                             <label class="block text-[11px] uppercase font-semibold text-gray-400 mb-1">Plan
                                 Name</label>
@@ -1508,26 +1509,47 @@
                         </div>
                         <div class="col-span-1 sm:col-span-2">
                             <label class="block text-[11px] uppercase font-semibold text-gray-400 mb-1">Cost</label>
-                            <input type="number" id="admin-invest-cost" placeholder="1000"
+                            <input type="number" id="admin-invest-cost" oninput="AppController.calculateTotalROI()"
+                                placeholder="1000"
                                 class="w-full px-3 py-2 rounded-lg bg-black/60 border border-white/10 text-sm text-white font-mono focus:border-royal-gold/50 focus:outline-none">
                         </div>
+                        <div class="col-span-1 sm:col-span-3">
+                            <label
+                                class="block text-[11px] uppercase font-semibold text-gray-400 mb-1">Frequency</label>
+                            <select id="admin-invest-frequency" onchange="AppController.calculateTotalROI()"
+                                class="w-full px-3 py-2 rounded-lg bg-black/60 border border-white/10 text-sm text-white focus:border-royal-gold/50 focus:outline-none">
+                                <option value="Maturity">Maturity (Lump Sum)</option>
+                                <option value="Daily">Daily Payout</option>
+                            </select>
+                        </div>
                         <div class="col-span-1 sm:col-span-2">
-                            <label class="block text-[11px] uppercase font-semibold text-gray-400 mb-1">Return
-                                Amount</label>
-                            <input type="number" id="admin-invest-return" placeholder="2000"
+                            <label class="block text-[11px] uppercase font-semibold text-gray-400 mb-1">Daily ROI
+                                (%)</label>
+                            <input type="number" step="0.1" id="admin-invest-roi"
+                                oninput="AppController.calculateTotalROI()" placeholder="3.0"
                                 class="w-full px-3 py-2 rounded-lg bg-black/60 border border-white/10 text-sm text-white font-mono focus:border-royal-gold/50 focus:outline-none">
                         </div>
                         <div class="col-span-1 sm:col-span-2">
                             <label class="block text-[11px] uppercase font-semibold text-gray-400 mb-1">Duration
                                 (Days)</label>
-                            <input type="number" id="admin-invest-duration" placeholder="3"
+                            <input type="number" id="admin-invest-duration" oninput="AppController.calculateTotalROI()"
+                                placeholder="3"
                                 class="w-full px-3 py-2 rounded-lg bg-black/60 border border-white/10 text-sm text-white font-mono focus:border-royal-gold/50 focus:outline-none">
                         </div>
-                        <div class="col-span-1 sm:col-span-3 flex gap-2">
+                    </div>
+
+                    <div class="grid grid-cols-1 sm:grid-cols-12 gap-3 items-end">
+                        <div class="col-span-1 sm:col-span-3">
+                            <label class="block text-[11px] uppercase font-semibold text-gray-400 mb-1">Return
+                                Amount</label>
+                            <input type="number" id="admin-invest-return" placeholder="2000"
+                                class="w-full px-3 py-2 rounded-lg bg-black/60 border border-white/10 text-sm text-white font-mono focus:border-royal-gold/50 focus:outline-none">
+                        </div>
+                        <div class="col-span-1 sm:col-span-9 flex gap-2">
                             <button onclick="AppController.saveAdminInvestPlan()"
                                 class="flex-1 py-2 rounded-lg bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-xs font-bold hover:bg-emerald-500/30 transition">Save</button>
                             <button onclick="AppController.hideAdminInvestForm()"
-                                class="px-3 py-2 rounded-lg bg-espresso-800 text-stone-300 border border-white/10 text-xs font-bold hover:bg-espresso-700 transition">Cancel</button>
+                                class="px-5 py-2 rounded-lg bg-espresso-800 text-stone-300 border border-white/10 text-xs font-bold hover:bg-espresso-700 transition">Cancel</button>
                         </div>
                     </div>
                 </div>
@@ -1840,6 +1862,100 @@
                 AWESOME!
             </button>
         </div>
+    </div>
+
+    <!-- Customer Support Live Chat Widget -->
+    <div id="live-chat-widget"
+        class="fixed bottom-4 right-4 sm:bottom-6 sm:right-6 z-[200] flex flex-col items-end pointer-events-none">
+        <div id="live-chat-window" data-initialized="false"
+            class="hidden w-[90vw] sm:w-96 h-[500px] mb-4 vault-card rounded-2xl flex-col overflow-hidden border border-royal-gold/30 shadow-[0_0_40px_rgba(255,215,0,0.15)] pointer-events-auto transition-all">
+            <!-- Header -->
+            <div
+                class="bg-gradient-to-r from-espresso-950 to-espresso-900 border-b border-white/10 p-4 flex items-center justify-between">
+                <div class="flex items-center gap-3">
+                    <div
+                        class="w-9 h-9 rounded-full bg-royal-gold/20 flex items-center justify-center border border-royal-gold/30">
+                        <i class="fa-solid fa-headset text-royal-gold text-sm"></i>
+                    </div>
+                    <div>
+                        <h3 class="font-display font-bold text-sm text-white leading-tight">Live Support</h3>
+                        <span class="text-[10px] text-emerald-400 font-medium flex items-center gap-1.5">
+                            <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> Online
+                        </span>
+                    </div>
+                </div>
+                <button type="button" onclick="document.getElementById('live-chat-window').classList.add('hidden')"
+                    class="w-8 h-8 rounded-full bg-black/40 border border-white/10 flex items-center justify-center text-gray-400 hover:text-white transition">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+
+            <!-- Guest onboarding form (visible only when no auth) -->
+            <div id="chat-guest-form-view" class="p-6 bg-black/80 overflow-y-auto flex-col" style="display:none;">
+                <div class="text-center mb-5 mt-2">
+                    <div
+                        class="w-14 h-14 rounded-full bg-royal-gold/20 mx-auto mb-3 flex items-center justify-center border border-royal-gold/30 shadow-[0_0_20px_rgba(255,215,0,0.25)]">
+                        <i class="fa-solid fa-comments text-royal-gold text-2xl"></i>
+                    </div>
+                    <h3 class="font-display font-bold text-white text-base">Start a Live Chat</h3>
+                    <p class="text-xs text-stone-400 mt-1 leading-relaxed">Share your details to connect with our
+                        support team. No account required.</p>
+                </div>
+                <form id="guest-chat-form" class="space-y-3" onsubmit="AppController.handleGuestChatSubmit(event)">
+                    <div>
+                        <label class="block text-xs font-semibold text-stone-300 mb-1.5">Full Name <span
+                                class="text-rose-400">*</span></label>
+                        <input type="text" id="guest-chat-name" required maxlength="100" placeholder="e.g. Jane Doe"
+                            class="chat-input-field w-full rounded-xl px-3.5 py-2.5 text-sm bg-[#111111] border border-white/20 text-white focus:outline-none focus:border-royal-gold transition shadow-inner">
+                        <p id="err-guest-name" class="hidden text-xs text-rose-400 mt-1"></p>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-stone-300 mb-1.5">Email Address <span
+                                class="text-rose-400">*</span></label>
+                        <input type="email" id="guest-chat-email" required maxlength="200" placeholder="you@example.com"
+                            class="chat-input-field w-full rounded-xl px-3.5 py-2.5 text-sm bg-[#111111] border border-white/20 text-white focus:outline-none focus:border-royal-gold transition shadow-inner">
+                        <p id="err-guest-email" class="hidden text-xs text-rose-400 mt-1"></p>
+                    </div>
+                    <button type="submit" id="btn-guest-chat-start"
+                        class="w-full py-2.5 rounded-xl btn-gold-gradient text-sm font-bold flex items-center justify-center gap-2 mt-2">
+                        <i class="fa-solid fa-paper-plane text-xs"></i>
+                        <span>Start Chat</span>
+                    </button>
+                </form>
+            </div>
+
+            <!-- Main chat view (body + input) -->
+            <div id="chat-main-view" class="flex-1 flex-col overflow-hidden" style="display:flex;">
+                <div id="player-chat-body" class="flex-1 p-4 bg-black/80 overflow-y-auto flex flex-col gap-4">
+                    <div class="text-center text-[10px] text-gray-500 font-semibold uppercase tracking-wider">Today
+                    </div>
+                    <div class="flex items-start gap-2.5">
+                        <div
+                            class="w-7 h-7 rounded-full bg-espresso-800 flex items-center justify-center shrink-0 border border-white/10 shadow-inner">
+                            <i class="fa-solid fa-robot text-[10px] text-royal-gold"></i>
+                        </div>
+                        <div
+                            class="bg-espresso-800 border border-white/10 rounded-2xl rounded-tl-sm p-3 text-xs text-gray-200 max-w-[80%] leading-relaxed shadow-md">
+                            Hello! Welcome to LuckyVault. How can we help you today?
+                        </div>
+                    </div>
+                </div>
+                <div class="p-3 bg-espresso-950 border-t border-white/10 flex items-center gap-2">
+                    <input type="text" id="player-chat-input" placeholder="Type your message..."
+                        class="chat-input-field flex-1 rounded-xl px-3.5 py-2.5 text-sm bg-[#111111] border border-white/20 text-white font-medium focus:outline-none focus:border-royal-gold focus:bg-black transition shadow-inner placeholder-gray-500">
+                    <button type="button" id="btn-player-chat-send"
+                        class="w-10 h-10 rounded-xl btn-gold-gradient flex items-center justify-center shrink-0 text-black shadow-md hover:scale-105 transition-transform">
+                        <i class="fa-solid fa-paper-plane text-xs"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Floating toggle button -->
+        <button type="button" onclick="document.getElementById('live-chat-window').classList.toggle('hidden')"
+            class="w-14 h-14 sm:w-16 sm:h-16 rounded-full btn-gold-gradient btn-glow-gold flex items-center justify-center shadow-[0_0_30px_rgba(255,215,0,0.3)] hover:scale-105 transition-transform duration-300 pointer-events-auto">
+            <i class="fa-solid fa-comments text-2xl sm:text-3xl text-espresso-950"></i>
+        </button>
     </div>
 
     <!-- Scripts -->

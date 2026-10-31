@@ -83,6 +83,8 @@ const InvestmentPlanSchema = new mongoose.Schema({
     planId: { type: String, required: true, unique: true, index: true },
     name: { type: String, required: true },
     cost: { type: Number, required: true, min: 0 },
+    payoutFrequency: { type: String, enum: ['Daily', 'Maturity'], default: 'Maturity' },
+    dailyRoiPercentage: { type: Number, default: 0, min: 0 },
     returnAmount: { type: Number, required: true, min: 0 },
     durationDays: { type: Number, required: true, min: 1 },
     isActive: { type: Boolean, default: true }
@@ -95,7 +97,14 @@ const UserInvestmentSchema = new mongoose.Schema({
     planId: { type: String, required: true },
     planName: { type: String, required: true },
     cost: { type: Number, required: true },
+    payoutFrequency: { type: String, enum: ['Daily', 'Maturity'], default: 'Maturity' },
+    dailyRoiPercentage: { type: Number, default: 0 },
+    dailyPayoutAmount: { type: Number, default: 0 },
     returnAmount: { type: Number, required: true },
+    durationDays: { type: Number, required: true },
+    lastPayoutDate: { type: Date, default: null },
+    nextPayoutDate: { type: Date, index: true },
+    completedPayouts: { type: Number, default: 0 },
     maturityDate: { type: Date, required: true, index: true },
     status: { type: String, enum: ['Active', 'Completed'], default: 'Active', index: true }
 }, { timestamps: true });
@@ -112,6 +121,20 @@ const TierPrizeStateSchema = new mongoose.Schema({
     p1000: { type: PrizeWindowSchema, default: () => ({ spinsSinceLast: 0, isActive: false, windowRemaining: 0, hasWonBefore: false }) },
     p500: { type: PrizeWindowSchema, default: () => ({ spinsSinceLast: 0, isActive: false, windowRemaining: 0, hasWonBefore: false }) }
 }, { _id: false });
+
+// New Chat Message Schema (supports registered users + guests)
+const ChatMessageSchema = new mongoose.Schema({
+    messageId: { type: String, required: true, unique: true, index: true },
+    userId: { type: String, required: true, index: true }, // "GUEST-xxxx" for guests
+    isGuest: { type: Boolean, default: false },
+    guestName: { type: String, default: '' },
+    guestEmail: { type: String, default: '' },
+    senderId: { type: String, required: true },
+    senderName: { type: String, required: true },
+    senderRole: { type: String, enum: ['player', 'admin', 'guest'], required: true },
+    message: { type: String, required: true },
+    isRead: { type: Boolean, default: false }
+}, { timestamps: true });
 
 const PlatformConfigSchema = new mongoose.Schema({
     singletonKey: { type: String, default: 'GLOBAL_CONFIG', unique: true },
@@ -206,6 +229,7 @@ const User = mongoose.model('User', UserSchema);
 const Transaction = mongoose.model('Transaction', TransactionSchema);
 const InvestmentPlan = mongoose.model('InvestmentPlan', InvestmentPlanSchema);
 const UserInvestment = mongoose.model('UserInvestment', UserInvestmentSchema);
+const ChatMessage = mongoose.model('ChatMessage', ChatMessageSchema);
 const PlatformConfig = mongoose.model('PlatformConfig', PlatformConfigSchema);
 
 // ====================================================================
@@ -514,9 +538,9 @@ async function initializeInvestments() {
     const count = await InvestmentPlan.countDocuments();
     if (count === 0) {
         await InvestmentPlan.create([
-            { planId: generateId('PLN'), name: 'Basic Plan', cost: 1000, returnAmount: 2000, durationDays: 3, isActive: true },
-            { planId: generateId('PLN'), name: 'Standard Plan', cost: 2000, returnAmount: 3500, durationDays: 5, isActive: true },
-            { planId: generateId('PLN'), name: 'Premium Plan', cost: 3000, returnAmount: 5000, durationDays: 7, isActive: true }
+            { planId: generateId('PLN'), name: 'Basic Plan', cost: 1000, payoutFrequency: 'Maturity', dailyRoiPercentage: 0, returnAmount: 2000, durationDays: 3, isActive: true },
+            { planId: generateId('PLN'), name: 'Standard Plan', cost: 2000, payoutFrequency: 'Maturity', dailyRoiPercentage: 0, returnAmount: 3500, durationDays: 5, isActive: true },
+            { planId: generateId('PLN'), name: 'Premium Plan', cost: 3000, payoutFrequency: 'Maturity', dailyRoiPercentage: 0, returnAmount: 5000, durationDays: 7, isActive: true }
         ]);
         console.log('✅ Initialized default Investment Plans.');
     }
@@ -707,6 +731,40 @@ const requireAdmin = (req, res, next) => {
     next();
 };
 
+// Accepts either a registered-user JWT or a guest JWT
+const requireChatAccess = async (req, res, next) => {
+    try {
+        const authHeader = req.headers.authorization;
+        if (!authHeader || !authHeader.startsWith('Bearer ')) {
+            return res.status(401).json({ message: 'Authentication required.' });
+        }
+        const token = authHeader.split(' ')[1];
+        const decoded = jwt.verify(token, ACTIVE_JWT_SECRET);
+
+        if (decoded.type === 'guest') {
+            req.guest = {
+                guestChatId: decoded.guestChatId,
+                guestName: decoded.guestName,
+                guestEmail: decoded.guestEmail
+            };
+            req.chatUserId = decoded.guestChatId;
+            req.chatRole = 'guest';
+            return next();
+        }
+
+        const user = await User.findOne({ userId: decoded.userId });
+        if (!user) return res.status(401).json({ message: 'Session invalid. User not found.' });
+        if (user.status === 'Suspended') return res.status(403).json({ message: 'Account suspended.' });
+
+        req.user = user;
+        req.chatUserId = user.userId;
+        req.chatRole = user.role;
+        next();
+    } catch (err) {
+        return res.status(401).json({ message: 'Invalid or expired chat token.' });
+    }
+};
+
 // ====================================================================
 // 4. HELPER FUNCTIONS (Weighted Server RNG & State Formatter)
 // ====================================================================
@@ -798,6 +856,8 @@ async function buildUserState(userDoc) {
             id: p.planId,
             name: p.name,
             cost: p.cost,
+            payoutFrequency: p.payoutFrequency || 'Maturity',
+            dailyRoiPercentage: p.dailyRoiPercentage || 0,
             returnAmount: p.returnAmount,
             durationDays: p.durationDays,
             isActive: p.isActive
@@ -809,7 +869,13 @@ async function buildUserState(userDoc) {
             planId: inv.planId,
             planName: inv.planName,
             cost: inv.cost,
+            payoutFrequency: inv.payoutFrequency || 'Maturity',
+            dailyRoiPercentage: inv.dailyRoiPercentage || 0,
+            dailyPayoutAmount: inv.dailyPayoutAmount || 0,
             returnAmount: inv.returnAmount,
+            completedPayouts: inv.completedPayouts || 0,
+            durationDays: inv.durationDays || 1,
+            nextPayoutDate: inv.nextPayoutDate,
             maturityDate: inv.maturityDate,
             status: inv.status,
             time: formatRelativeTime(inv.createdAt)
@@ -834,6 +900,8 @@ app.get('/api/public/config', async (req, res) => {
                 id: p.planId,
                 name: p.name,
                 cost: p.cost,
+                payoutFrequency: p.payoutFrequency || 'Maturity',
+                dailyRoiPercentage: p.dailyRoiPercentage || 0,
                 returnAmount: p.returnAmount,
                 durationDays: p.durationDays,
                 isActive: p.isActive
@@ -1202,6 +1270,16 @@ app.post('/api/investments/purchase', requireAuth, async (req, res) => {
         const maturityDate = new Date();
         maturityDate.setDate(maturityDate.getDate() + plan.durationDays);
 
+        const freq = plan.payoutFrequency || 'Maturity';
+        let dailyPayoutAmount = 0;
+        let nextPayoutDate = null;
+
+        if (freq === 'Daily') {
+            dailyPayoutAmount = Number((plan.cost * ((plan.dailyRoiPercentage || 0) / 100)).toFixed(2));
+            nextPayoutDate = new Date();
+            nextPayoutDate.setDate(nextPayoutDate.getDate() + 1);
+        }
+
         const newInv = await UserInvestment.create({
             invId: generateId('INV'),
             userId: updatedUser.userId,
@@ -1209,7 +1287,12 @@ app.post('/api/investments/purchase', requireAuth, async (req, res) => {
             planId: plan.planId,
             planName: plan.name,
             cost: plan.cost,
+            payoutFrequency: freq,
+            dailyRoiPercentage: plan.dailyRoiPercentage || 0,
+            dailyPayoutAmount: dailyPayoutAmount,
             returnAmount: plan.returnAmount,
+            durationDays: plan.durationDays,
+            nextPayoutDate: nextPayoutDate,
             maturityDate: maturityDate,
             status: 'Active'
         });
@@ -1599,7 +1682,7 @@ app.post('/api/games/mystery-box/open', requireAuth, async (req, res) => {
 // Admin Investment Plan Routes
 app.post('/api/admin/investments', requireAuth, requireAdmin, async (req, res) => {
     try {
-        const { name, cost, returnAmount, durationDays, isActive } = req.body;
+        const { name, cost, returnAmount, durationDays, isActive, payoutFrequency, dailyRoiPercentage } = req.body;
 
         if (!name || Number(cost) <= 0 || Number(returnAmount) <= 0 || Number(durationDays) < 1) {
             return res.status(400).json({ message: 'Please provide valid configuration data for the investment plan.' });
@@ -1609,6 +1692,8 @@ app.post('/api/admin/investments', requireAuth, requireAdmin, async (req, res) =
             planId: generateId('PLN'),
             name: String(name).trim(),
             cost: Number(cost),
+            payoutFrequency: payoutFrequency === 'Daily' ? 'Daily' : 'Maturity',
+            dailyRoiPercentage: Number(dailyRoiPercentage || 0),
             returnAmount: Number(returnAmount),
             durationDays: Number(durationDays),
             isActive: Boolean(isActive ?? true)
@@ -1623,7 +1708,7 @@ app.post('/api/admin/investments', requireAuth, requireAdmin, async (req, res) =
 
 app.put('/api/admin/investments/:planId', requireAuth, requireAdmin, async (req, res) => {
     try {
-        const { name, cost, returnAmount, durationDays, isActive } = req.body;
+        const { name, cost, returnAmount, durationDays, isActive, payoutFrequency, dailyRoiPercentage } = req.body;
 
         const plan = await InvestmentPlan.findOne({ planId: req.params.planId });
         if (!plan) {
@@ -1635,6 +1720,8 @@ app.put('/api/admin/investments/:planId', requireAuth, requireAdmin, async (req,
         if (returnAmount !== undefined && Number(returnAmount) >= 0) plan.returnAmount = Number(returnAmount);
         if (durationDays !== undefined && Number(durationDays) >= 1) plan.durationDays = Number(durationDays);
         if (isActive !== undefined) plan.isActive = Boolean(isActive);
+        if (payoutFrequency !== undefined) plan.payoutFrequency = payoutFrequency === 'Daily' ? 'Daily' : 'Maturity';
+        if (dailyRoiPercentage !== undefined && Number(dailyRoiPercentage) >= 0) plan.dailyRoiPercentage = Number(dailyRoiPercentage);
 
         await plan.save();
         const state = await buildUserState(req.user);
@@ -1982,6 +2069,221 @@ app.put('/api/admin/settings', requireAuth, requireAdmin, async (req, res) => {
 });
 
 // ====================================================================
+// 6.5 CUSTOMER SUPPORT CHAT ENDPOINTS
+// ====================================================================
+
+app.get('/api/chat/messages', requireAuth, async (req, res) => {
+    try {
+        const targetUserId = req.user.role === 'admin' && req.query.userId ? req.query.userId : req.user.userId;
+        const messages = await ChatMessage.find({ userId: targetUserId }).sort({ createdAt: 1 }).lean();
+        res.json({ messages });
+    } catch (err) {
+        res.status(500).json({ message: 'Failed to fetch messages.' });
+    }
+});
+
+app.post('/api/chat/send', requireAuth, async (req, res) => {
+    try {
+        const { message, targetUserId } = req.body;
+        if (!message || !String(message).trim()) {
+            return res.status(400).json({ message: 'Message cannot be empty.' });
+        }
+        const chatRoomUserId = req.user.role === 'admin' ? targetUserId : req.user.userId;
+        if (req.user.role === 'admin' && !chatRoomUserId) {
+            return res.status(400).json({ message: 'Admin must specify a user to reply to.' });
+        }
+
+        let isGuest = false, guestName = '', guestEmail = '';
+        if (chatRoomUserId.startsWith('GUEST-')) {
+            const guestMsg = await ChatMessage.findOne({ userId: chatRoomUserId, isGuest: true }).lean();
+            if (!guestMsg) {
+                return res.status(400).json({ message: 'Guest session not found.' });
+            }
+            isGuest = true;
+            guestName = guestMsg.guestName;
+            guestEmail = guestMsg.guestEmail;
+        }
+
+        const newMsg = await ChatMessage.create({
+            messageId: generateId('MSG'),
+            userId: chatRoomUserId,
+            isGuest, guestName, guestEmail,
+            senderId: req.user.userId,
+            senderName: req.user.name,
+            senderRole: req.user.role,
+            message: String(message).trim(),
+            isRead: false
+        });
+        res.status(201).json({ message: newMsg });
+    } catch (err) {
+        res.status(500).json({ message: 'Failed to send message.' });
+    }
+});
+
+app.post('/api/chat/mark-read', requireAuth, async (req, res) => {
+    try {
+        const { targetUserId } = req.body;
+        const chatRoomUserId = req.user.role === 'admin' ? targetUserId : req.user.userId;
+        const senderRolesToMark = req.user.role === 'admin' ? ['player', 'guest'] : ['admin'];
+        await ChatMessage.updateMany(
+            { userId: chatRoomUserId, senderRole: { $in: senderRolesToMark }, isRead: false },
+            { $set: { isRead: true } }
+        );
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ message: 'Failed to mark read.' });
+    }
+});
+
+// ============ GUEST CHAT ENDPOINTS ============
+
+app.post('/api/chat/guest/init', async (req, res) => {
+    try {
+        const { name, email } = req.body;
+        const cleanName = String(name || '').trim().slice(0, 100);
+        const cleanEmail = String(email || '').trim().toLowerCase().slice(0, 200);
+        if (!cleanName) return res.status(400).json({ message: 'Please provide your full name.' });
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+            return res.status(400).json({ message: 'Please provide a valid email address.' });
+        }
+
+        const guestChatId = `GUEST-${crypto.randomBytes(6).toString('hex').toUpperCase()}`;
+        const guestToken = jwt.sign(
+            { guestChatId, guestName: cleanName, guestEmail: cleanEmail, type: 'guest' },
+            ACTIVE_JWT_SECRET,
+            { expiresIn: '7d' }
+        );
+
+        // Seed the session with a welcome message so the admin sees the guest
+        await ChatMessage.create({
+            messageId: generateId('MSG'),
+            userId: guestChatId,
+            isGuest: true,
+            guestName: cleanName,
+            guestEmail: cleanEmail,
+            senderId: 'system',
+            senderName: 'LuckyVault Support',
+            senderRole: 'admin',
+            message: `Hi ${cleanName}! 👋 Welcome to LuckyVault. Our support team will be with you shortly — feel free to describe your question.`,
+            isRead: false
+        });
+
+        res.json({ guestToken, guestChatId, guestName: cleanName, guestEmail: cleanEmail });
+    } catch (err) {
+        res.status(500).json({ message: 'Failed to initialize guest chat.' });
+    }
+});
+
+app.get('/api/chat/guest/messages', requireChatAccess, async (req, res) => {
+    try {
+        if (req.chatRole !== 'guest') return res.status(403).json({ message: 'Guest access required.' });
+        const messages = await ChatMessage.find({ userId: req.chatUserId }).sort({ createdAt: 1 }).lean();
+        res.json({ messages });
+    } catch (err) {
+        res.status(500).json({ message: 'Failed to fetch messages.' });
+    }
+});
+
+app.post('/api/chat/guest/send', requireChatAccess, async (req, res) => {
+    try {
+        if (req.chatRole !== 'guest') return res.status(403).json({ message: 'Guest access required.' });
+        const { message } = req.body;
+        if (!message || !String(message).trim()) {
+            return res.status(400).json({ message: 'Message cannot be empty.' });
+        }
+        const newMsg = await ChatMessage.create({
+            messageId: generateId('MSG'),
+            userId: req.chatUserId,
+            isGuest: true,
+            guestName: req.guest.guestName,
+            guestEmail: req.guest.guestEmail,
+            senderId: req.chatUserId,
+            senderName: req.guest.guestName,
+            senderRole: 'guest',
+            message: String(message).trim(),
+            isRead: false
+        });
+        res.status(201).json({ message: newMsg });
+    } catch (err) {
+        res.status(500).json({ message: 'Failed to send message.' });
+    }
+});
+
+app.post('/api/chat/guest/mark-read', requireChatAccess, async (req, res) => {
+    try {
+        if (req.chatRole !== 'guest') return res.status(403).json({ message: 'Guest access required.' });
+        await ChatMessage.updateMany(
+            { userId: req.chatUserId, senderRole: 'admin', isRead: false },
+            { $set: { isRead: true } }
+        );
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ message: 'Failed to mark read.' });
+    }
+});
+
+app.get('/api/admin/chat/sessions', requireAuth, requireAdmin, async (req, res) => {
+    try {
+        const sessions = await ChatMessage.aggregate([
+            { $sort: { createdAt: -1 } },
+            {
+                $group: {
+                    _id: "$userId",
+                    lastMessage: { $first: "$message" },
+                    lastMessageDate: { $first: "$createdAt" },
+                    isGuest: { $first: "$isGuest" },
+                    guestName: { $first: "$guestName" },
+                    guestEmail: { $first: "$guestEmail" },
+                    unreadCount: {
+                        $sum: {
+                            $cond: [
+                                {
+                                    $and: [{ $eq: ["$isRead", false] },
+                                    { $in: ["$senderRole", ["player", "guest"]] }]
+                                },
+                                1, 0
+                            ]
+                        }
+                    }
+                }
+            },
+            { $sort: { lastMessageDate: -1 } }
+        ]);
+
+        const populated = [];
+        for (const s of sessions) {
+            if (s.isGuest) {
+                populated.push({
+                    userId: s._id,
+                    userName: s.guestName || 'Guest Visitor',
+                    userEmail: s.guestEmail || '',
+                    isGuest: true,
+                    lastMessage: s.lastMessage,
+                    lastMessageDate: s.lastMessageDate,
+                    unreadCount: s.unreadCount
+                });
+            } else {
+                const u = await User.findOne({ userId: s._id }).lean();
+                if (u) {
+                    populated.push({
+                        userId: u.userId,
+                        userName: u.name,
+                        userEmail: u.email,
+                        isGuest: false,
+                        lastMessage: s.lastMessage,
+                        lastMessageDate: s.lastMessageDate,
+                        unreadCount: s.unreadCount
+                    });
+                }
+            }
+        }
+        res.json({ sessions: populated });
+    } catch (err) {
+        res.status(500).json({ message: 'Failed to fetch chat sessions.' });
+    }
+});
+
+// ====================================================================
 // 7. SECURE STATIC ASSET & SMART AUDIO ROUTING
 // ====================================================================
 
@@ -2055,7 +2357,11 @@ app.get('/app.js', (req, res) => {
 async function processMaturedInvestments() {
     try {
         const now = new Date();
-        const matured = await UserInvestment.find({ status: 'Active', maturityDate: { $lte: now } });
+        const matured = await UserInvestment.find({
+            status: 'Active',
+            maturityDate: { $lte: now },
+            $or: [{ payoutFrequency: 'Maturity' }, { payoutFrequency: { $exists: false } }]
+        });
 
         for (const inv of matured) {
             const updatedInv = await UserInvestment.findOneAndUpdate(
@@ -2087,8 +2393,61 @@ async function processMaturedInvestments() {
     }
 }
 
+async function processDailyPayouts() {
+    try {
+        const now = new Date();
+        const dueInvestments = await UserInvestment.find({
+            status: 'Active',
+            payoutFrequency: 'Daily',
+            nextPayoutDate: { $lte: now }
+        });
+
+        for (const inv of dueInvestments) {
+            const nextDate = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+
+            const lockedInv = await UserInvestment.findOneAndUpdate(
+                { _id: inv._id, status: 'Active', nextPayoutDate: { $lte: now } },
+                {
+                    $set: { nextPayoutDate: nextDate, lastPayoutDate: now },
+                    $inc: { completedPayouts: 1 }
+                },
+                { new: true }
+            );
+
+            if (lockedInv) {
+                await User.findOneAndUpdate(
+                    { userId: lockedInv.userId },
+                    { $inc: { balance: lockedInv.dailyPayoutAmount } }
+                );
+
+                await Transaction.create({
+                    txId: generateId('TX'),
+                    userId: lockedInv.userId,
+                    user: lockedInv.user,
+                    type: 'INVEST_PAYOUT',
+                    desc: `Daily ROI Payout (${lockedInv.completedPayouts}/${lockedInv.durationDays}) - ${lockedInv.planName}`,
+                    cost: 0,
+                    credit: lockedInv.dailyPayoutAmount,
+                    status: 'Completed'
+                });
+
+                if (lockedInv.completedPayouts >= lockedInv.durationDays || lockedInv.nextPayoutDate >= lockedInv.maturityDate) {
+                    await UserInvestment.updateOne(
+                        { _id: lockedInv._id },
+                        { $set: { status: 'Completed' } }
+                    );
+                }
+            }
+        }
+    } catch (err) {
+        console.error('Error processing daily payouts:', err.message);
+    }
+}
+
 // Check for matured investments every 60 seconds
 setInterval(processMaturedInvestments, 60 * 1000);
+// Check for daily ROI payouts every 60 seconds
+setInterval(processDailyPayouts, 60 * 1000);
 
 // ====================================================================
 // 9. MONGODB ATLAS CONNECTION & SERVER STARTUP
