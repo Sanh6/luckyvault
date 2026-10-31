@@ -54,14 +54,14 @@ const ApiClient = (() => {
     let guestToken = localStorage.getItem('lv_guest_token') || null;
 
     const getReferenceWheelSegments = () => [
-        { id: 1, label: '₦50', value: 50.00, color: '#c91429', weight: 15 },
+        { id: 1, label: '₦50', value: 50.00, color: '#c91429', weight: 20 },
         { id: 2, label: '₦100', value: 100.00, color: '#f0c330', weight: 15 },
-        { id: 3, label: '₦500', value: 500.00, color: '#1b6b6b', weight: 10 },
-        { id: 4, label: '₦1000', value: 1000.00, color: '#623aa2', weight: 8 },
-        { id: 5, label: '₦200', value: 200.00, color: '#ea691c', weight: 5 },
-        { id: 6, label: '₦300', value: 300.00, color: '#1565c0', weight: 2 },
+        { id: 3, label: '₦500', value: 500.00, color: '#1b6b6b', weight: 3 },
+        { id: 4, label: '₦1000', value: 1000.00, color: '#623aa2', weight: 2 },
+        { id: 5, label: '₦200', value: 200.00, color: '#ea691c', weight: 10 },
+        { id: 6, label: '₦300', value: 300.00, color: '#1565c0', weight: 5 },
         { id: 7, label: '₦5000', value: 5000.00, color: '#278a3f', weight: 1 },
-        { id: 8, label: '₦0', value: 0.00, color: '#111111', weight: 20 }
+        { id: 8, label: '₦0', value: 0.00, color: '#111111', weight: 40 }
     ];
 
     const getReferenceSlotPrizes = () => [
@@ -77,13 +77,13 @@ const ApiClient = (() => {
 
     const getReferenceMysteryPrizes = (boostRate = 0) => {
         const baseWeights = [
-            { label: '₦50', value: 50.00, weight: 27 * (1 - boostRate * 0.5) },
-            { label: '₦100', value: 100.00, weight: 27 * (1 - boostRate * 0.5) },
-            { label: '₦200', value: 200.00, weight: 9 * (1 + boostRate) },
-            { label: '₦300', value: 300.00, weight: 4 * (1 + boostRate) },
-            { label: '₦500', value: 500.00, weight: 18 * (1 + boostRate) },
-            { label: '₦1000', value: 1000.00, weight: 13 * (1 + boostRate) },
-            { label: '₦5000', value: 5000.00, weight: 2 * (1 + boostRate) }
+            { label: '₦50', value: 50.00, weight: 50 * (1 - boostRate * 0.5) },
+            { label: '₦100', value: 100.00, weight: 30 * (1 - boostRate * 0.5) },
+            { label: '₦200', value: 200.00, weight: 10 * (1 + boostRate) },
+            { label: '₦300', value: 300.00, weight: 5 * (1 + boostRate) },
+            { label: '₦500', value: 500.00, weight: 3 * (1 + boostRate) },
+            { label: '₦1000', value: 1000.00, weight: 1.5 * (1 + boostRate) },
+            { label: '₦5000', value: 5000.00, weight: 0.5 * (1 + boostRate) }
         ];
         const total = baseWeights.reduce((sum, item) => sum + item.weight, 0);
         return baseWeights.map(item => ({
@@ -233,8 +233,34 @@ const ApiClient = (() => {
                 ...currentSlotConfig,
                 spinCost: newState.wheelConfig?.spinCost || currentSlotConfig.spinCost || 250.00
             };
-        } else if (!Array.isArray(state.slotConfig.prizes) || state.slotConfig.prizes.length === 0) {
-            state.slotConfig.prizes = getReferenceSlotPrizes();
+        } else {
+            // Normalize backend `payouts` → frontend `prizes`
+            if ((!Array.isArray(state.slotConfig.prizes) || state.slotConfig.prizes.length === 0)
+                && Array.isArray(state.slotConfig.payouts) && state.slotConfig.payouts.length > 0) {
+                const fallbackColors = {
+                    5000: '#c91429', 1000: '#623aa2', 500: '#1b6b6b',
+                    300: '#1565c0', 200: '#ea691c', 100: '#f0c330',
+                    50: '#278a3f', 0: '#111111'
+                };
+                state.slotConfig.prizes = state.slotConfig.payouts.map(p => {
+                    const sym = p.symbol && p.symbol !== 'MISS' ? p.symbol : null;
+                    return {
+                        id: Number(p.id),
+                        label: p.label,
+                        value: Number(p.value),
+                        name: p.name,
+                        weight: Number(p.weight),
+                        symbol: p.symbol,
+                        color: p.color || fallbackColors[Number(p.value)] || '#c91429',
+                        combo: Array.isArray(p.combo)
+                            ? p.combo
+                            : (sym ? [sym, sym, sym] : ['CHERRY', 'LEMON', 'GRAPE'])
+                    };
+                });
+            }
+            if (!Array.isArray(state.slotConfig.prizes) || state.slotConfig.prizes.length === 0) {
+                state.slotConfig.prizes = getReferenceSlotPrizes();
+            }
         }
 
         if (state.mysteryConfig && !state.mysteryConfig.activeBoxId) state.mysteryConfig.activeBoxId = currentActiveBox;
@@ -540,7 +566,7 @@ const ApiClient = (() => {
 
         updateSlotConfig: async (payload) => {
             try {
-                const data = await apiRequest('/admin/slot', {
+                const data = await apiRequest('/admin/slots', {
                     method: 'PUT',
                     body: JSON.stringify(payload)
                 });
@@ -2126,6 +2152,7 @@ const AppController = (() => {
             renderAdminPortal();
         }
     };
+
     let countdownInterval = null;
 
     const startInvestmentCountdowns = () => {
