@@ -548,6 +548,13 @@ const ApiClient = (() => {
             return data;
         },
 
+        adminResetUserPassword: async (userId) => {
+            const data = await apiRequest(`/admin/users/${encodeURIComponent(userId)}/reset-password`, {
+                method: 'POST'
+            });
+            return data;
+        },
+
         adminApproveRecharge: async (txId) => {
             const data = await apiRequest(`/admin/recharges/${encodeURIComponent(txId)}/approve`, {
                 method: 'POST'
@@ -618,7 +625,7 @@ const SoundFX = (() => {
     const SLOT_CANDIDATES = ['/api/sound/slot', '/sound/Slots.mp3', '/Slots.mp3'];
     const BG_SECONDARY_CANDIDATES = ['/api/sound/undertaker'];
 
-    const BG_VOLUME = 0.25;
+    const BG_VOLUME = 0.15;
     const GAME_VOLUME = 0.85;
 
     let wheelAudio = null;
@@ -980,6 +987,7 @@ const AppController = (() => {
     let isSlotSpinning = false;
     let isPurchasingInvestment = false;
     let chatPollInterval = null;
+    let pendingPasswordResetUser = null;
 
     // SVG Symbols for the 3-Reel 777 Jackpot Slot Machine
     const SLOT_SYMBOL_SVGS = {
@@ -2278,7 +2286,6 @@ const AppController = (() => {
 
         startInvestmentCountdowns();
     };
-
     const renderPlayerHistory = () => {
         const tbody = document.getElementById('player-history-tbody');
         if (!tbody) return;
@@ -2592,6 +2599,136 @@ const AppController = (() => {
                 </tr>
             `;
         }).join('');
+    };
+
+    const adminSearchUserForReset = () => {
+        const input = document.getElementById('pw-reset-search-input');
+        const wrapper = document.getElementById('pw-reset-result-wrapper');
+        const tempBox = document.getElementById('pw-reset-temp-password-box');
+        if (!input || !wrapper) return;
+
+        const raw = input.value.trim();
+        const q = raw.toLowerCase();
+        if (!q) {
+            showToast('Please enter an email or phone number.', 'error');
+            return;
+        }
+
+        const state = ApiClient.getState();
+        const users = state.users || [];
+        const qDigits = q.replace(/\D/g, '');
+
+        // Exact matches first (email or phone)
+        const exactMatches = users.filter(u =>
+            (u.email && u.email.toLowerCase() === q) ||
+            (qDigits && u.phone && u.phone.replace(/\D/g, '') === qDigits)
+        );
+
+        const matched = exactMatches.length > 0
+            ? exactMatches[0]
+            : users.find(u =>
+                (u.email && u.email.toLowerCase().includes(q)) ||
+                (u.phone && u.phone.toLowerCase().includes(q)) ||
+                (u.name && u.name.toLowerCase().includes(q))
+            );
+
+        if (!matched) {
+            pendingPasswordResetUser = null;
+            wrapper.classList.add('hidden');
+            if (tempBox) tempBox.classList.add('hidden');
+            showToast('No user found matching that email or phone.', 'error');
+            return;
+        }
+
+        pendingPasswordResetUser = matched;
+        if (tempBox) tempBox.classList.add('hidden');
+
+        const curr = state.settings.currency || '₦';
+        const nameEl = document.getElementById('pw-reset-user-name');
+        const emailEl = document.getElementById('pw-reset-user-email');
+        const phoneEl = document.getElementById('pw-reset-user-phone');
+        const statusEl = document.getElementById('pw-reset-user-status');
+        const balanceEl = document.getElementById('pw-reset-user-balance');
+
+        if (nameEl) nameEl.textContent = matched.name || '—';
+        if (emailEl) emailEl.textContent = matched.email || '—';
+        if (phoneEl) phoneEl.textContent = matched.phone || '—';
+        if (statusEl) {
+            statusEl.textContent = matched.status || 'Active';
+            statusEl.className = matched.status === 'Suspended'
+                ? 'font-semibold text-rose-400'
+                : 'font-semibold text-emerald-400';
+        }
+        if (balanceEl) {
+            balanceEl.textContent = `${curr}${Number(matched.balance || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+        }
+
+        wrapper.classList.remove('hidden');
+        showToast(`Found user: ${matched.name}. Confirm details before resetting.`, 'info');
+    };
+
+    const adminConfirmResetPassword = async () => {
+        if (!pendingPasswordResetUser) {
+            showToast('Search for a user before resetting.', 'error');
+            return;
+        }
+        const btn = document.getElementById('pw-reset-confirm-btn');
+        const userId = pendingPasswordResetUser.id;
+        if (btn) {
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin mr-1"></i> Resetting...';
+        }
+        try {
+            const data = await ApiClient.adminResetUserPassword(userId);
+            const tempBox = document.getElementById('pw-reset-temp-password-box');
+            const tempVal = document.getElementById('pw-reset-temp-password-value');
+            if (tempVal) tempVal.value = data.tempPassword || '';
+            if (tempBox) tempBox.classList.remove('hidden');
+            ConfettiEngine.launch();
+            showToast(`Password reset for ${data.userName}. Copy the temp password below.`, 'success');
+        } catch (err) {
+            showToast(err.message || 'Failed to reset password.', 'error');
+        } finally {
+            if (btn) {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fa-solid fa-rotate mr-1"></i> Reset Password Now';
+            }
+        }
+    };
+
+    const adminCopyTempPassword = async () => {
+        const field = document.getElementById('pw-reset-temp-password-value');
+        if (!field || !field.value) {
+            showToast('No temporary password to copy.', 'error');
+            return;
+        }
+        try {
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                await navigator.clipboard.writeText(field.value);
+            } else {
+                field.select();
+                field.setSelectionRange(0, 99999);
+                document.execCommand('copy');
+            }
+            showToast('Temporary password copied to clipboard.', 'success');
+        } catch (e) {
+            field.select();
+            field.setSelectionRange(0, 99999);
+            showToast('Press Ctrl+C (or Cmd+C) to copy the selected password.', 'info');
+        }
+    };
+
+    const adminClearPasswordReset = () => {
+        pendingPasswordResetUser = null;
+        const input = document.getElementById('pw-reset-search-input');
+        const wrapper = document.getElementById('pw-reset-result-wrapper');
+        const tempBox = document.getElementById('pw-reset-temp-password-box');
+        const tempVal = document.getElementById('pw-reset-temp-password-value');
+        if (input) input.value = '';
+        if (wrapper) wrapper.classList.add('hidden');
+        if (tempBox) tempBox.classList.add('hidden');
+        if (tempVal) tempVal.value = '';
+        showToast('Reset form cleared.', 'info');
     };
 
     const renderAdminWallets = () => {
@@ -3760,6 +3897,10 @@ const AppController = (() => {
         renderAdminUsers,
         renderAdminTransactions,
         renderAdminWithdrawals,
+        adminSearchUserForReset,
+        adminConfirmResetPassword,
+        adminCopyTempPassword,
+        adminClearPasswordReset,
         loadPlayerChat,
         sendPlayerChatMessage,
         handleGuestChatSubmit,

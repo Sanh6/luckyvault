@@ -1169,7 +1169,6 @@
 
         </main>
     </div>
-
     <!-- ================================================================= -->
     <!-- VIEW: ADMIN DASHBOARD -->
     <!-- ================================================================= -->
@@ -1285,6 +1284,91 @@
                         placeholder="Search by name, email or phone..."
                         class="w-full sm:w-64 px-4 py-2 rounded-xl bg-black/60 border border-white/10 text-sm text-white focus:outline-none focus:border-royal-gold/50 shadow-inner">
                 </div>
+
+                <!-- Reset User Password Panel -->
+                <div class="mb-6 p-4 bg-black/40 border border-royal-gold/25 rounded-2xl shadow-inner">
+                    <div class="flex items-start justify-between mb-3 gap-2">
+                        <div>
+                            <h3 class="font-display font-bold text-white text-sm flex items-center gap-2">
+                                <i class="fa-solid fa-key text-royal-gold"></i> Reset User Password
+                            </h3>
+                            <p class="text-[11px] text-stone-400 mt-0.5">Search a user by email or phone to generate a
+                                new temporary password.</p>
+                        </div>
+                        <button type="button" id="pw-reset-clear-btn" onclick="AppController.adminClearPasswordReset()"
+                            class="text-[11px] text-stone-400 hover:text-white transition px-2.5 py-1 rounded-lg border border-white/10 hover:border-white/30 whitespace-nowrap">
+                            <i class="fa-solid fa-eraser mr-1"></i> Clear
+                        </button>
+                    </div>
+
+                    <div class="flex flex-col sm:flex-row gap-2 mb-4">
+                        <input type="text" id="pw-reset-search-input" placeholder="Enter user's email or phone..."
+                            autocomplete="off"
+                            class="flex-1 px-4 py-2.5 rounded-xl bg-black/60 border border-white/10 text-sm text-white focus:outline-none focus:border-royal-gold/50 shadow-inner"
+                            onkeypress="if(event.key==='Enter'){event.preventDefault();AppController.adminSearchUserForReset();}">
+                        <button type="button" onclick="AppController.adminSearchUserForReset()" id="pw-reset-search-btn"
+                            class="px-5 py-2.5 rounded-xl btn-gold-gradient text-xs font-bold whitespace-nowrap">
+                            <i class="fa-solid fa-magnifying-glass mr-1"></i> Search User
+                        </button>
+                    </div>
+
+                    <div id="pw-reset-result-wrapper" class="hidden space-y-3">
+                        <div class="p-3 rounded-xl bg-espresso-950/70 border border-white/10 space-y-1.5">
+                            <div class="flex justify-between text-xs gap-2">
+                                <span class="text-stone-400">Name:</span>
+                                <span id="pw-reset-user-name"
+                                    class="font-semibold text-white truncate text-right">—</span>
+                            </div>
+                            <div class="flex justify-between text-xs gap-2">
+                                <span class="text-stone-400">Email:</span>
+                                <span id="pw-reset-user-email"
+                                    class="font-mono text-stone-200 truncate text-right">—</span>
+                            </div>
+                            <div class="flex justify-between text-xs gap-2">
+                                <span class="text-stone-400">Phone:</span>
+                                <span id="pw-reset-user-phone"
+                                    class="font-mono text-stone-200 truncate text-right">—</span>
+                            </div>
+                            <div class="flex justify-between text-xs gap-2">
+                                <span class="text-stone-400">Status:</span>
+                                <span id="pw-reset-user-status" class="font-semibold text-emerald-400">—</span>
+                            </div>
+                            <div class="flex justify-between text-xs gap-2">
+                                <span class="text-stone-400">Balance:</span>
+                                <span id="pw-reset-user-balance" class="font-mono font-bold text-royal-gold">—</span>
+                            </div>
+                        </div>
+
+                        <button type="button" onclick="AppController.adminConfirmResetPassword()"
+                            id="pw-reset-confirm-btn"
+                            class="w-full py-2.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-xs font-bold transition disabled:opacity-50 disabled:cursor-not-allowed">
+                            <i class="fa-solid fa-rotate mr-1"></i> Reset Password Now
+                        </button>
+
+                        <div id="pw-reset-temp-password-box"
+                            class="hidden p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/40 space-y-2">
+                            <div class="text-[10px] uppercase font-bold text-emerald-300 tracking-wider">
+                                <i class="fa-solid fa-check-circle mr-1"></i> New Temporary Password
+                            </div>
+                            <div class="flex flex-col sm:flex-row gap-2">
+                                <input type="text" id="pw-reset-temp-password-value" readonly
+                                    class="flex-1 px-3 py-2.5 rounded-lg bg-black/60 border border-emerald-500/30 text-sm font-mono font-bold text-emerald-300 tracking-wider focus:outline-none"
+                                    onclick="this.select()">
+                                <button type="button" onclick="AppController.adminCopyTempPassword()"
+                                    id="pw-reset-copy-btn"
+                                    class="px-4 py-2.5 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 text-xs font-bold whitespace-nowrap transition">
+                                    <i class="fa-solid fa-copy mr-1"></i> Copy
+                                </button>
+                            </div>
+                            <p class="text-[10px] text-stone-400 leading-relaxed">
+                                <i class="fa-solid fa-info-circle mr-1 text-amber-400"></i>
+                                Share this password with the user via Live Chat. It replaces their previous password
+                                immediately.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+
                 <div class="overflow-x-auto">
                     <table class="w-full text-left border-collapse">
                         <thead>
