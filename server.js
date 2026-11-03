@@ -2397,10 +2397,34 @@ async function processDailyPayouts() {
     }
 }
 
+async function processExpiredRecharges() {
+    try {
+        // Find pending recharges older than 60 minutes (Korapay default expiry)
+        const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+
+        const result = await Transaction.updateMany(
+            {
+                type: 'RECHARGE',
+                status: 'Pending',
+                createdAt: { $lte: oneHourAgo }
+            },
+            { $set: { status: 'Rejected' } }
+        );
+
+        if (result.modifiedCount > 0) {
+            console.log(`🧹 Expired ${result.modifiedCount} pending recharge requests.`);
+        }
+    } catch (err) {
+        console.error('Error processing expired recharges:', err.message);
+    }
+}
+
 // Check for matured synthetic plans every 60 seconds
 setInterval(processMaturedInvestments, 60 * 1000);
 // Check for daily ROI payouts every 60 seconds
 setInterval(processDailyPayouts, 60 * 1000);
+// Check for expired pending recharges every 5 minutes
+setInterval(processExpiredRecharges, 5 * 60 * 1000);
 
 // ====================================================================
 // 9. MONGODB ATLAS CONNECTION & SERVER STARTUP
