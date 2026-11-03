@@ -622,7 +622,7 @@
                 </button>
                 <button id="pnav-invest" onclick="AppController.switchPlayerSection('invest')"
                     class="px-3.5 py-2 rounded-xl text-xs sm:text-sm font-semibold transition flex items-center gap-2 text-gray-400 hover:text-white whitespace-nowrap">
-                    <i class="fa-solid fa-chart-line"></i> Invest
+                    <i class="fa-solid fa-chart-line"></i> Synthetic Plans
                 </button>
                 <button id="pnav-history" onclick="AppController.switchPlayerSection('history')"
                     class="px-3.5 py-2 rounded-xl text-xs sm:text-sm font-semibold transition flex items-center gap-2 text-gray-400 hover:text-white whitespace-nowrap">
@@ -1081,14 +1081,14 @@
                     </div>
                 </section>
 
-                <!-- Investment Plans Section -->
+                <!-- Synthetic Plans Section -->
                 <section id="player-sec-invest"
                     class="vault-card rounded-3xl p-4 sm:p-6 flex flex-col relative hidden w-full mb-6 xl:col-span-12">
                     <div class="flex items-center justify-between mb-4">
                         <div>
                             <h2
                                 class="font-display font-extrabold text-lg sm:text-xl text-white flex items-center gap-2">
-                                <i class="fa-solid fa-chart-line text-emerald-400"></i> INVESTMENT PLANS
+                                <i class="fa-solid fa-chart-line text-emerald-400"></i> SYNTHETIC PLANS
                             </h2>
                             <p class="text-[11px] sm:text-xs text-gray-400 mt-0.5">Grow your balance with timed maturity
                                 packages.</p>
@@ -1224,7 +1224,8 @@
                     class="px-3.5 py-2 rounded-xl text-xs sm:text-sm font-semibold transition text-gray-400 hover:bg-espresso-800 hover:text-white whitespace-nowrap">All
                     Txs</button>
                 <button id="anav-investments" onclick="AppController.switchAdminTab('investments')"
-                    class="px-3.5 py-2 rounded-xl text-xs sm:text-sm font-semibold transition text-gray-400 hover:bg-espresso-800 hover:text-white whitespace-nowrap">Investments</button>
+                    class="px-3.5 py-2 rounded-xl text-xs sm:text-sm font-semibold transition text-gray-400 hover:bg-espresso-800 hover:text-white whitespace-nowrap">Synthetic
+                    Plans</button>
                 <button id="anav-settings" onclick="AppController.switchAdminTab('settings')"
                     class="px-3.5 py-2 rounded-xl text-xs sm:text-sm font-semibold transition text-gray-400 hover:bg-espresso-800 hover:text-white whitespace-nowrap">Settings</button>
             </div>
@@ -1564,11 +1565,11 @@
                 </div>
             </section>
 
-            <!-- Admin Tab: Investments -->
+            <!-- Admin Tab: Synthetic Plans -->
             <section id="admin-tab-investments" class="vault-card rounded-3xl p-4 sm:p-6 hidden">
                 <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
                     <div>
-                        <h2 class="font-display font-extrabold text-xl text-white">Investment Plans Configuration</h2>
+                        <h2 class="font-display font-extrabold text-xl text-white">Synthetic Plans Configuration</h2>
                         <p class="text-xs text-gray-400 mt-1">Manage investment packages and maturity yields
                             dynamically.</p>
                     </div>
@@ -1582,7 +1583,7 @@
                     class="hidden mb-6 p-4 bg-black/40 border border-white/10 rounded-2xl shadow-inner">
                     <input type="hidden" id="admin-invest-id" value="">
                     <h3 id="admin-invest-form-title" class="font-display font-bold text-sm text-royal-gold mb-3">Create
-                        Investment Plan</h3>
+                        Synthetic Plan</h3>
 
                     <div class="grid grid-cols-1 sm:grid-cols-12 gap-3 items-end mb-3">
                         <div class="col-span-1 sm:col-span-3">

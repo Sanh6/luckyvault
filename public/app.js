@@ -3,7 +3,7 @@
  * LuckyVault — app.js (Production Release)
  * ====================================================================
  * Layer 0: ToneLoader          (Lazy-loads Tone.js on user gesture)
- * Layer 1: ApiClient           (Authenticated REST Client + Investment Plans)
+ * Layer 1: ApiClient           (Authenticated REST Client + Synthetic Plans)
  * Layer 2: SoundFX             (MP3 Game & Background Audio Manager + Tone.js fanfare)
  * Layer 3: ConfettiEngine      (Celebration particles)
  * Layer 4: AppController       (UI renderer + controller: Wheel, Mystery Box, 777 Slots & Investments)
@@ -96,9 +96,9 @@ const ApiClient = (() => {
     let state = {
         settings: {
             currency: '₦',
-            minRecharge: 100,
+            minRecharge: 1000,
             maxRecharge: 3000,
-            minWithdrawal: 50,
+            minWithdrawal: 1000,
             regBonus: 0,
             instantRechargeApproval: false,
             maintenanceMode: false,
@@ -532,14 +532,6 @@ const ApiClient = (() => {
         },
 
         // Admin API calls
-        adminCreditUser: async (userId, amount) => {
-            const data = await apiRequest(`/admin/users/${encodeURIComponent(userId)}/credit`, {
-                method: 'POST',
-                body: JSON.stringify({ amount })
-            });
-            applyServerState(data.state);
-        },
-
         adminToggleUserStatus: async (userId) => {
             const data = await apiRequest(`/admin/users/${encodeURIComponent(userId)}/status`, {
                 method: 'PATCH'
@@ -553,14 +545,6 @@ const ApiClient = (() => {
                 method: 'POST'
             });
             return data;
-        },
-
-        adminApproveRecharge: async (txId) => {
-            const data = await apiRequest(`/admin/recharges/${encodeURIComponent(txId)}/approve`, {
-                method: 'POST'
-            });
-            applyServerState(data.state);
-            return data.tx;
         },
 
         updateWheelConfig: async (payload) => {
@@ -1221,7 +1205,7 @@ const AppController = (() => {
     };
 
     /**
-     * Dynamically injects the Investment Plan UI DOM for Players & Admins if missing
+     * Dynamically injects the Synthetic Plan UI DOM for Players & Admins if missing
      */
     const ensureInvestmentDOM = () => {
         const historyNavBtn = document.getElementById('pnav-history');
@@ -1230,7 +1214,7 @@ const AppController = (() => {
             investBtn.id = 'pnav-invest';
             investBtn.setAttribute('onclick', "AppController.switchPlayerSection('invest')");
             investBtn.className = 'px-3.5 py-2 rounded-xl text-xs sm:text-sm font-semibold transition flex items-center gap-2 text-gray-400 hover:text-white whitespace-nowrap';
-            investBtn.innerHTML = `<i class="fa-solid fa-chart-line"></i> Invest`;
+            investBtn.innerHTML = `<i class="fa-solid fa-chart-line"></i> Synthetic Plans`;
             historyNavBtn.insertAdjacentElement('beforebegin', investBtn);
         }
 
@@ -1243,7 +1227,7 @@ const AppController = (() => {
                 <div class="flex items-center justify-between mb-4">
                     <div>
                         <h2 class="font-display font-extrabold text-lg sm:text-xl text-white flex items-center gap-2">
-                            <i class="fa-solid fa-chart-line text-emerald-400"></i> INVESTMENT PLANS
+                            <i class="fa-solid fa-chart-line text-emerald-400"></i> SYNTHETIC PLANS
                         </h2>
                         <p class="text-[11px] sm:text-xs text-gray-400 mt-0.5">Grow your balance with timed maturity packages.</p>
                     </div>
@@ -1279,7 +1263,7 @@ const AppController = (() => {
             adminInvestBtn.id = 'anav-investments';
             adminInvestBtn.setAttribute('onclick', "AppController.switchAdminTab('investments')");
             adminInvestBtn.className = 'px-3.5 py-2 rounded-xl text-xs sm:text-sm font-semibold transition text-gray-400 hover:bg-espresso-800 hover:text-white whitespace-nowrap';
-            adminInvestBtn.textContent = 'Investments';
+            adminInvestBtn.textContent = 'Synthetic Plans';
             anavSettings.insertAdjacentElement('beforebegin', adminInvestBtn);
         }
 
@@ -1291,8 +1275,8 @@ const AppController = (() => {
             adminInvestSec.innerHTML = `
                 <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
                     <div>
-                        <h2 class="font-display font-extrabold text-xl text-white">Investment Plans Configuration</h2>
-                        <p class="text-xs text-gray-400 mt-1">Manage investment packages and maturity yields dynamically.</p>
+                        <h2 class="font-display font-extrabold text-xl text-white">Synthetic Plans Configuration</h2>
+                        <p class="text-xs text-gray-400 mt-1">Manage synthetic packages and maturity yields dynamically.</p>
                     </div>
                     <button onclick="AppController.showAdminInvestForm()" class="px-4 py-2 rounded-xl btn-gold-gradient text-xs font-bold shadow-inner">
                         <i class="fa-solid fa-plus mr-1"></i> Create New Plan
@@ -1301,7 +1285,7 @@ const AppController = (() => {
                 
                 <div id="admin-invest-form-container" class="hidden mb-6 p-4 bg-black/40 border border-white/10 rounded-2xl shadow-inner">
                     <input type="hidden" id="admin-invest-id" value="">
-                    <h3 id="admin-invest-form-title" class="font-display font-bold text-sm text-royal-gold mb-3">Create Investment Plan</h3>
+                    <h3 id="admin-invest-form-title" class="font-display font-bold text-sm text-royal-gold mb-3">Create Synthetic Plan</h3>
                     
                     <div class="grid grid-cols-1 sm:grid-cols-12 gap-3 items-end mb-3">
                         <div class="col-span-1 sm:col-span-3">
@@ -1933,7 +1917,6 @@ const AppController = (() => {
             }
         }
     };
-
     const syncAllViews = () => {
         ensureSlotMachineDOM();
         ensureInvestmentDOM();
@@ -2209,7 +2192,7 @@ const AppController = (() => {
         if (grid) {
             const activePlans = (state.investmentPlans || []).filter(p => p.isActive);
             if (activePlans.length === 0) {
-                grid.innerHTML = `<div class="col-span-full py-8 text-center text-stone-400 text-sm">No investment plans are available at the moment.</div>`;
+                grid.innerHTML = `<div class="col-span-full py-8 text-center text-stone-400 text-sm">No synthetic plans are available at the moment.</div>`;
             } else {
                 grid.innerHTML = activePlans.map(plan => {
                     const profitPercentage = (((plan.returnAmount - plan.cost) / plan.cost) * 100).toFixed(0);
@@ -2254,7 +2237,7 @@ const AppController = (() => {
         if (portTbody) {
             const userInvests = (state.investments || []).filter(inv => inv.userId === state.currentUser?.id);
             if (userInvests.length === 0) {
-                portTbody.innerHTML = `<tr><td colspan="5" class="py-6 text-center text-stone-400 text-xs">You have no active investments.</td></tr>`;
+                portTbody.innerHTML = `<tr><td colspan="5" class="py-6 text-center text-stone-400 text-xs">You have no active synthetic plans.</td></tr>`;
             } else {
                 portTbody.innerHTML = userInvests.map(inv => {
                     const isCompleted = inv.status === 'Completed';
@@ -2313,7 +2296,7 @@ const AppController = (() => {
                 BOX: `<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-royal-pink/15 text-pink-300 text-xs font-semibold"><i class="fa-solid fa-gift"></i>Box</span>`,
                 RECHARGE: `<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-500/15 text-emerald-300 text-xs font-semibold"><i class="fa-solid fa-wallet"></i>Recharge</span>`,
                 WITHDRAWAL: `<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-royal-pink/15 text-pink-300 text-xs font-semibold"><i class="fa-solid fa-money-bill-transfer"></i>Withdraw</span>`,
-                INVEST_BUY: `<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-sky-500/15 text-sky-300 text-xs font-semibold"><i class="fa-solid fa-chart-line"></i>Invest</span>`,
+                INVEST_BUY: `<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-sky-500/15 text-sky-300 text-xs font-semibold"><i class="fa-solid fa-chart-line"></i>Synthetic</span>`,
                 INVEST_PAYOUT: `<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-500/15 text-emerald-300 text-xs font-semibold"><i class="fa-solid fa-hand-holding-dollar"></i>Payout</span>`
             };
 
@@ -2407,7 +2390,7 @@ const AppController = (() => {
         setVal('set-currency', state.settings.currency);
         setVal('set-min-recharge', state.settings.minRecharge);
         setVal('set-max-recharge', state.settings.maxRecharge);
-        setVal('set-min-withdrawal', state.settings.minWithdrawal ?? 50);
+        setVal('set-min-withdrawal', state.settings.minWithdrawal ?? 1000);
         setVal('set-reg-bonus', state.settings.regBonus);
 
         const bank = state.settings.bankDetails || {};
@@ -2440,7 +2423,7 @@ const AppController = (() => {
         const plans = state.investmentPlans || [];
 
         if (plans.length === 0) {
-            tbody.innerHTML = `<tr><td colspan="6" class="py-8 text-center text-stone-400 text-xs">No investment plans configured.</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="6" class="py-8 text-center text-stone-400 text-xs">No synthetic plans configured.</td></tr>`;
             return;
         }
 
@@ -2486,7 +2469,7 @@ const AppController = (() => {
         document.getElementById('admin-invest-roi').value = '0';
         document.getElementById('admin-invest-return').value = '';
         document.getElementById('admin-invest-duration').value = '';
-        document.getElementById('admin-invest-form-title').textContent = 'Create Investment Plan';
+        document.getElementById('admin-invest-form-title').textContent = 'Create Synthetic Plan';
     };
 
     const hideAdminInvestForm = () => {
@@ -2500,7 +2483,7 @@ const AppController = (() => {
         if (!plan) return;
 
         showAdminInvestForm();
-        document.getElementById('admin-invest-form-title').textContent = 'Edit Investment Plan';
+        document.getElementById('admin-invest-form-title').textContent = 'Edit Synthetic Plan';
         document.getElementById('admin-invest-id').value = plan.id;
         document.getElementById('admin-invest-name').value = plan.name;
         document.getElementById('admin-invest-cost').value = plan.cost;
@@ -2550,10 +2533,10 @@ const AppController = (() => {
     };
 
     const deleteAdminInvestPlan = async (planId) => {
-        if (!confirm('Are you sure you want to delete this plan? Active investments will prevent deletion.')) return;
+        if (!confirm('Are you sure you want to delete this plan? Active synthetic plans will prevent deletion.')) return;
         try {
             await ApiClient.adminDeleteInvestmentPlan(planId);
-            showToast('Investment plan deleted successfully.', 'success');
+            showToast('Synthetic plan deleted successfully.', 'success');
             syncAllViews();
         } catch (err) {
             showToast(err.message, 'error');
@@ -2591,7 +2574,6 @@ const AppController = (() => {
                         </span>
                     </td>
                     <td class="py-3.5 px-4 text-right space-x-1.5">
-                        <button onclick="AppController.adminCreditUser('${u.id}', 1000)" class="px-2.5 py-1 rounded-lg bg-espresso-800 hover:bg-espresso-700 text-royal-gold border border-royal-gold/30 text-xs font-semibold">+${curr}1000</button>
                         <button onclick="AppController.adminToggleUserStatus('${u.id}')" class="px-2.5 py-1 rounded-lg bg-espresso-800 hover:bg-espresso-700 text-stone-200 border border-white/10 text-xs font-semibold">
                             ${isAct ? 'Suspend' : 'Activate'}
                         </button>
@@ -2757,7 +2739,7 @@ const AppController = (() => {
                     <td class="py-3.5 px-4 text-xs text-stone-400">${tx.time}</td>
                     <td class="py-3.5 px-4 text-right">
                         ${isPending
-                    ? `<button onclick="AppController.adminApproveRecharge('${tx.id}')" class="px-3 py-1 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 text-xs font-bold">Approve &amp; Credit</button>`
+                    ? `<span class="text-xs text-amber-500 font-bold">Awaiting Gateway</span>`
                     : `<span class="text-xs text-stone-500">Verified</span>`}
                     </td>
                 </tr>
@@ -3497,7 +3479,7 @@ const AppController = (() => {
         const state = ApiClient.getState();
         const user = state.currentUser;
         const curr = state.settings.currency || '₦';
-        const minW = Number(state.settings.minWithdrawal ?? 50);
+        const minW = Number(state.settings.minWithdrawal ?? 1000);
 
         if (!user) {
             showToast('Please sign in to withdraw.', 'error');
@@ -3587,7 +3569,7 @@ const AppController = (() => {
         const state = ApiClient.getState();
         const curr = state.settings.currency || '₦';
         const user = state.currentUser;
-        const minW = Number(state.settings.minWithdrawal ?? 50);
+        const minW = Number(state.settings.minWithdrawal ?? 1000);
         const amount = Number(document.getElementById('withdraw-amount-input').value);
 
         if (!Number.isFinite(amount) || amount < minW) {
@@ -3645,32 +3627,10 @@ const AppController = (() => {
         document.getElementById('modal-prize-result').classList.add('hidden');
     };
 
-    const adminCreditUser = async (userId, amount) => {
-        try {
-            const curr = ApiClient.getState().settings.currency || '₦';
-            await ApiClient.adminCreditUser(userId, amount);
-            showToast(`Credited +${curr}${amount.toFixed(2)} to user wallet.`, 'success');
-            syncAllViews();
-        } catch (err) {
-            showToast(err.message, 'error');
-        }
-    };
-
     const adminToggleUserStatus = async (userId) => {
         try {
             const res = await ApiClient.adminToggleUserStatus(userId);
             showToast(`${res.userName} status updated to ${res.userStatus}.`, 'info');
-            syncAllViews();
-        } catch (err) {
-            showToast(err.message, 'error');
-        }
-    };
-
-    const adminApproveRecharge = async (txId) => {
-        try {
-            const curr = ApiClient.getState().settings.currency || '₦';
-            const tx = await ApiClient.adminApproveRecharge(txId);
-            showToast(`Approved recharge ${txId} (+${curr}${Number(tx.credit).toFixed(2)}) for ${tx.user}.`, 'success');
             syncAllViews();
         } catch (err) {
             showToast(err.message, 'error');
@@ -3775,7 +3735,7 @@ const AppController = (() => {
                 currency: document.getElementById('set-currency')?.value || '₦',
                 minRecharge: Number(document.getElementById('set-min-recharge')?.value) || 100,
                 maxRecharge: Number(document.getElementById('set-max-recharge')?.value) || 3000,
-                minWithdrawal: Math.max(0, Number(document.getElementById('set-min-withdrawal')?.value ?? 50)),
+                minWithdrawal: Math.max(0, Number(document.getElementById('set-min-withdrawal')?.value ?? 1000)),
                 regBonus: Math.max(0, Number(document.getElementById('set-reg-bonus')?.value ?? 0)),
                 instantRechargeApproval: Boolean(document.getElementById('set-instant-recharge')?.checked),
                 maintenanceMode: Boolean(document.getElementById('set-maintenance')?.checked),
@@ -3875,9 +3835,7 @@ const AppController = (() => {
         saveBankDetails,
         confirmWithdrawal,
         closePrizeModal,
-        adminCreditUser,
         adminToggleUserStatus,
-        adminApproveRecharge,
         adminApproveWithdrawal,
         adminRejectWithdrawal,
         saveWheelConfigFromAdmin,

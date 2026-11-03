@@ -122,7 +122,6 @@ const TierPrizeStateSchema = new mongoose.Schema({
     p500: { type: PrizeWindowSchema, default: () => ({ spinsSinceLast: 0, isActive: false, windowRemaining: 0, hasWonBefore: false }) }
 }, { _id: false });
 
-// New Chat Message Schema (supports registered users + guests)
 const ChatMessageSchema = new mongoose.Schema({
     messageId: { type: String, required: true, unique: true, index: true },
     userId: { type: String, required: true, index: true }, // "GUEST-xxxx" for guests
@@ -140,9 +139,9 @@ const PlatformConfigSchema = new mongoose.Schema({
     singletonKey: { type: String, default: 'GLOBAL_CONFIG', unique: true },
     settings: {
         currency: { type: String, default: '₦' },
-        minRecharge: { type: Number, default: 100 },
+        minRecharge: { type: Number, default: 1000 },
         maxRecharge: { type: Number, default: 3000 },
-        minWithdrawal: { type: Number, default: 50 },
+        minWithdrawal: { type: Number, default: 1000 },
         regBonus: { type: Number, default: 0 },
         instantRechargeApproval: { type: Boolean, default: false },
         maintenanceMode: { type: Boolean, default: false },
@@ -543,7 +542,7 @@ async function initializeInvestments() {
             { planId: generateId('PLN'), name: 'Standard Plan', cost: 2000, payoutFrequency: 'Maturity', dailyRoiPercentage: 0, returnAmount: 3500, durationDays: 5, isActive: true },
             { planId: generateId('PLN'), name: 'Premium Plan', cost: 3000, payoutFrequency: 'Maturity', dailyRoiPercentage: 0, returnAmount: 5000, durationDays: 7, isActive: true }
         ]);
-        console.log('✅ Initialized default Investment Plans.');
+        console.log('✅ Initialized default Synthetic Plans.');
     }
 }
 
@@ -555,9 +554,9 @@ async function initializePlatform() {
             singletonKey: 'GLOBAL_CONFIG',
             settings: {
                 currency: '₦',
-                minRecharge: 100,
+                minRecharge: 1000,
                 maxRecharge: 3000,
-                minWithdrawal: 50,
+                minWithdrawal: 1000,
                 regBonus: 0,
                 instantRechargeApproval: false,
                 maintenanceMode: false,
@@ -581,15 +580,15 @@ async function initializePlatform() {
                 config.settings.currency = '₦';
                 needsMigration = true;
             }
-            if (config.settings.minRecharge !== 100 || config.settings.maxRecharge !== 3000) {
-                config.settings.minRecharge = 100;
+            if (config.settings.minRecharge !== 1000 || config.settings.maxRecharge !== 3000) {
+                config.settings.minRecharge = 1000;
                 config.settings.maxRecharge = 3000;
                 needsMigration = true;
             }
             if (config.settings.minWithdrawal === undefined || config.settings.minWithdrawal === null) {
-                config.settings.minWithdrawal = 50;
+                config.settings.minWithdrawal = 1000;
                 needsMigration = true;
-                console.log('✅ Migrated settings with minWithdrawal default (₦50).');
+                console.log('✅ Migrated settings with minWithdrawal default (₦1000).');
             }
             if (!config.settings.bankDetails) {
                 config.settings.bankDetails = { bankName: 'Moniepoint MFB', accountNumber: '1234567890', accountName: 'LuckyVault Gaming' };
@@ -1189,7 +1188,7 @@ app.post('/api/wallet/withdraw', requireAuth, async (req, res) => {
     try {
         const amount = Number(req.body.amount);
         const config = await PlatformConfig.findOne({ singletonKey: 'GLOBAL_CONFIG' });
-        const minWithdrawal = Number(config.settings.minWithdrawal ?? 50);
+        const minWithdrawal = Number(config.settings.minWithdrawal ?? 1000);
 
         if (!Number.isFinite(amount) || amount < minWithdrawal) {
             return res.status(400).json({ message: `Minimum withdrawal is ${config.settings.currency}${minWithdrawal.toFixed(2)}.` });
@@ -1251,7 +1250,7 @@ app.post('/api/investments/purchase', requireAuth, async (req, res) => {
 
         const plan = await InvestmentPlan.findOne({ planId, isActive: true });
         if (!plan) {
-            return res.status(404).json({ message: 'Investment plan not found or no longer active.' });
+            return res.status(404).json({ message: 'Synthetic plan not found or no longer active.' });
         }
 
         if (Number(req.user.balance) < plan.cost) {
@@ -1303,7 +1302,7 @@ app.post('/api/investments/purchase', requireAuth, async (req, res) => {
             userId: updatedUser.userId,
             user: updatedUser.name,
             type: 'INVEST_BUY',
-            desc: `Purchased Investment Plan: ${plan.name}`,
+            desc: `Purchased Synthetic Plan: ${plan.name}`,
             cost: plan.cost,
             credit: 0,
             status: 'Completed'
@@ -1312,7 +1311,7 @@ app.post('/api/investments/purchase', requireAuth, async (req, res) => {
         const state = await buildUserState(updatedUser);
         res.json({ investment: newInv, state });
     } catch (err) {
-        res.status(500).json({ message: 'Failed to purchase investment plan. Please try again.' });
+        res.status(500).json({ message: 'Failed to purchase synthetic plan. Please try again.' });
     }
 });
 
@@ -1686,7 +1685,7 @@ app.post('/api/admin/investments', requireAuth, requireAdmin, async (req, res) =
         const { name, cost, returnAmount, durationDays, isActive, payoutFrequency, dailyRoiPercentage } = req.body;
 
         if (!name || Number(cost) <= 0 || Number(returnAmount) <= 0 || Number(durationDays) < 1) {
-            return res.status(400).json({ message: 'Please provide valid configuration data for the investment plan.' });
+            return res.status(400).json({ message: 'Please provide valid configuration data for the synthetic plan.' });
         }
 
         const newPlan = await InvestmentPlan.create({
@@ -1703,7 +1702,7 @@ app.post('/api/admin/investments', requireAuth, requireAdmin, async (req, res) =
         const state = await buildUserState(req.user);
         res.json({ plan: newPlan, state });
     } catch (err) {
-        res.status(500).json({ message: 'Failed to create new investment plan.' });
+        res.status(500).json({ message: 'Failed to create new synthetic plan.' });
     }
 });
 
@@ -1713,7 +1712,7 @@ app.put('/api/admin/investments/:planId', requireAuth, requireAdmin, async (req,
 
         const plan = await InvestmentPlan.findOne({ planId: req.params.planId });
         if (!plan) {
-            return res.status(404).json({ message: 'Investment plan not found.' });
+            return res.status(404).json({ message: 'Synthetic plan not found.' });
         }
 
         if (name) plan.name = String(name).trim();
@@ -1728,7 +1727,7 @@ app.put('/api/admin/investments/:planId', requireAuth, requireAdmin, async (req,
         const state = await buildUserState(req.user);
         res.json({ plan, state });
     } catch (err) {
-        res.status(500).json({ message: 'Failed to update investment plan.' });
+        res.status(500).json({ message: 'Failed to update synthetic plan.' });
     }
 });
 
@@ -1738,46 +1737,14 @@ app.delete('/api/admin/investments/:planId', requireAuth, requireAdmin, async (r
         const activeInvestments = await UserInvestment.countDocuments({ planId, status: 'Active' });
 
         if (activeInvestments > 0) {
-            return res.status(400).json({ message: 'Cannot delete plan. There are active user investments tied to it. Please deactivate it instead.' });
+            return res.status(400).json({ message: 'Cannot delete plan. There are active synthetic plans tied to it. Please deactivate it instead.' });
         }
 
         await InvestmentPlan.findOneAndDelete({ planId });
         const state = await buildUserState(req.user);
-        res.json({ message: 'Investment plan deleted successfully.', state });
+        res.json({ message: 'Synthetic plan deleted successfully.', state });
     } catch (err) {
-        res.status(500).json({ message: 'Failed to delete investment plan.' });
-    }
-});
-
-app.post('/api/admin/users/:userId/credit', requireAuth, requireAdmin, async (req, res) => {
-    try {
-        const num = Number(req.body.amount);
-        if (!Number.isFinite(num) || num <= 0) {
-            return res.status(400).json({ message: 'Please provide a valid positive credit amount.' });
-        }
-
-        const user = await User.findOneAndUpdate(
-            { userId: req.params.userId },
-            { $inc: { balance: Number(num.toFixed(2)) } },
-            { new: true }
-        );
-        if (!user) return res.status(404).json({ message: 'Target user not found.' });
-
-        await Transaction.create({
-            txId: generateId('TX'),
-            userId: user.userId,
-            user: user.name,
-            type: 'RECHARGE',
-            desc: 'Admin Manual Wallet Credit',
-            cost: 0,
-            credit: Number(num.toFixed(2)),
-            status: 'Completed'
-        });
-
-        const state = await buildUserState(req.user);
-        res.json({ state });
-    } catch (err) {
-        res.status(500).json({ message: err.message });
+        res.status(500).json({ message: 'Failed to delete synthetic plan.' });
     }
 });
 
@@ -1847,32 +1814,8 @@ app.post('/api/admin/users/:userId/reset-password', requireAuth, requireAdmin, a
     }
 });
 
-app.post('/api/admin/recharges/:txId/approve', requireAuth, requireAdmin, async (req, res) => {
-    try {
-        const txDoc = await Transaction.findOneAndUpdate(
-            { txId: req.params.txId, type: 'RECHARGE', status: 'Pending' },
-            { $set: { status: 'Completed' } },
-            { new: true }
-        );
-
-        if (!txDoc) {
-            return res.status(400).json({ message: 'Transaction not found or already approved.' });
-        }
-
-        await User.findOneAndUpdate(
-            { userId: txDoc.userId },
-            { $inc: { balance: Number(txDoc.credit.toFixed(2)) } }
-        );
-
-        const state = await buildUserState(req.user);
-        res.json({ tx: formatTransaction(txDoc), state });
-    } catch (err) {
-        res.status(500).json({ message: err.message });
-    }
-});
-
 // --------------------------------------------------------------------
-// Korapay: Admin Withdrawal Approval → Automated Disbursement
+// Withdrawal Approval → Manual Update Workflow
 // --------------------------------------------------------------------
 app.post('/api/admin/withdrawals/:txId/approve', requireAuth, requireAdmin, async (req, res) => {
     try {
@@ -1882,93 +1825,14 @@ app.post('/api/admin/withdrawals/:txId/approve', requireAuth, requireAdmin, asyn
             return res.status(400).json({ message: 'Withdrawal request not found or already processed.' });
         }
 
-        const user = await User.findOne({ userId: txDoc.userId });
-        if (!user) {
-            return res.status(404).json({ message: 'Associated user account not found.' });
-        }
-
-        if (!user.bankDetails || !user.bankDetails.bankName || !user.bankDetails.accountNumber) {
-            return res.status(400).json({ message: 'User does not have bank details on file. Cannot disburse.' });
-        }
-
-        // Maintain a robust mapping for common Nigerian banks for Korapay's strict 3-digit CBN bank codes.
-        const bankCodeMap = {
-            'access bank': '044',
-            'access bank (diamond)': '063',
-            'alat by wema': '035A',
-            'ecobank': '050',
-            'ecobank nigeria': '050',
-            'fidelity bank': '070',
-            'first bank': '011',
-            'first bank of nigeria': '011',
-            'first city monument bank': '214',
-            'fcmb': '214',
-            'guaranty trust bank': '058',
-            'gtb': '058',
-            'gtbank': '058',
-            'heritage bank': '030',
-            'keystone bank': '082',
-            'kuda': '50211',
-            'kuda bank': '50211',
-            'moniepoint': '50515',
-            'moniepoint mfb': '50515',
-            'opay': '100004',
-            'palmpay': '100033',
-            'polaris bank': '076',
-            'providus bank': '101',
-            'stanbic ibtc': '221',
-            'stanbic ibtc bank': '221',
-            'standard chartered bank': '068',
-            'sterling bank': '232',
-            'suntrust bank': '100',
-            'union bank': '032',
-            'union bank of nigeria': '032',
-            'united bank for africa': '033',
-            'uba': '033',
-            'unity bank': '215',
-            'wema bank': '035',
-            'zenith bank': '057'
-        };
-
-        const providedBank = user.bankDetails.bankName.trim().toLowerCase();
-        const bankCode = bankCodeMap[providedBank] || user.bankDetails.bankName.trim();
-
-        const koraResponse = await fetch('https://api.korapay.com/merchant/api/v1/transactions/disburse', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${KORAPAY_SECRET_KEY}`
-            },
-            body: JSON.stringify({
-                reference: `PAY-${txDoc.txId}`,
-                destination: {
-                    type: 'bank_account',
-                    amount: txDoc.cost,
-                    currency: 'NGN',
-                    bank_account: {
-                        bank: bankCode,
-                        account_number: user.bankDetails.accountNumber
-                    }
-                },
-                customer: {
-                    email: user.email
-                }
-            })
-        });
-
-        const koraData = await koraResponse.json();
-        if (!koraResponse.ok || !koraData.status) {
-            const koraMsg = koraData && koraData.message ? koraData.message : 'Check bank details/bank code.';
-            return res.status(400).json({ message: 'Korapay Disbursement Failed: ' + koraMsg });
-        }
-
+        // Manually mark as Completed. Funds were previously deducted during the initial request.
         txDoc.status = 'Completed';
         await txDoc.save();
 
         const state = await buildUserState(req.user);
         res.json({ tx: formatTransaction(txDoc), state });
     } catch (err) {
-        console.error('Korapay Disbursement Error:', err);
+        console.error('Manual Withdrawal Approval Error:', err);
         res.status(500).json({ message: err.message });
     }
 });
@@ -2470,7 +2334,7 @@ async function processMaturedInvestments() {
                     userId: inv.userId,
                     user: inv.user,
                     type: 'INVEST_PAYOUT',
-                    desc: `Investment Maturity Payout: ${inv.planName}`,
+                    desc: `Synthetic Plan Maturity Payout: ${inv.planName}`,
                     cost: 0,
                     credit: inv.returnAmount,
                     status: 'Completed'
@@ -2478,7 +2342,7 @@ async function processMaturedInvestments() {
             }
         }
     } catch (err) {
-        console.error('Error processing matured investments:', err.message);
+        console.error('Error processing matured synthetic plans:', err.message);
     }
 }
 
@@ -2533,7 +2397,7 @@ async function processDailyPayouts() {
     }
 }
 
-// Check for matured investments every 60 seconds
+// Check for matured synthetic plans every 60 seconds
 setInterval(processMaturedInvestments, 60 * 1000);
 // Check for daily ROI payouts every 60 seconds
 setInterval(processDailyPayouts, 60 * 1000);
