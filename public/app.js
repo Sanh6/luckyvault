@@ -2727,6 +2727,17 @@ const AppController = (() => {
 
         tbody.innerHTML = recharges.map(tx => {
             const isPending = tx.status === 'Pending';
+            const isRejected = tx.status === 'Rejected';
+
+            let statusBadge;
+            if (isPending) {
+                statusBadge = `<span class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-500/20 text-amber-300">Pending</span>`;
+            } else if (isRejected) {
+                statusBadge = `<span class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-rose-500/20 text-rose-300">Expired</span>`;
+            } else {
+                statusBadge = `<span class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-500/15 text-emerald-300">${tx.status}</span>`;
+            }
+
             return `
                 <tr class="hover:bg-white/[0.02]">
                     <td class="py-3.5 px-4 font-mono text-xs text-stone-300">${tx.id}</td>
@@ -2734,13 +2745,15 @@ const AppController = (() => {
                     <td class="py-3.5 px-4 font-display font-bold text-emerald-400">+${curr}${tx.credit.toFixed(2)}</td>
                     <td class="py-3.5 px-4 text-xs text-stone-300">${tx.desc}</td>
                     <td class="py-3.5 px-4">
-                        <span class="px-2.5 py-0.5 rounded-full text-xs font-bold ${isPending ? 'bg-amber-500/20 text-amber-300' : 'bg-emerald-500/15 text-emerald-300'}">${tx.status}</span>
+                        ${statusBadge}
                     </td>
                     <td class="py-3.5 px-4 text-xs text-stone-400">${tx.time}</td>
                     <td class="py-3.5 px-4 text-right">
                         ${isPending
                     ? `<span class="text-xs text-amber-500 font-bold">Awaiting Gateway</span>`
-                    : `<span class="text-xs text-stone-500">Verified</span>`}
+                    : isRejected
+                        ? `<span class="text-xs text-rose-400 font-bold">Timeout</span>`
+                        : `<span class="text-xs text-stone-500">Verified</span>`}
                     </td>
                 </tr>
             `;
