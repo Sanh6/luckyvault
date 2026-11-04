@@ -2194,70 +2194,149 @@ const AppController = (() => {
             if (activePlans.length === 0) {
                 grid.innerHTML = `<div class="col-span-full py-8 text-center text-stone-400 text-sm">No synthetic plans are available at the moment.</div>`;
             } else {
-                grid.innerHTML = activePlans.map(plan => {
+                grid.innerHTML = activePlans.map((plan, index) => {
                     const profitPercentage = (((plan.returnAmount - plan.cost) / plan.cost) * 100).toFixed(0);
                     const roiBadge = plan.payoutFrequency === 'Daily'
-                        ? `<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 whitespace-nowrap">${plan.dailyRoiPercentage}% Daily ROI</span>`
-                        : `<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 whitespace-nowrap">+${profitPercentage}% ROI</span>`;
+                        ? `${plan.dailyRoiPercentage}% Daily`
+                        : `+${profitPercentage}% ROI`;
+
+                    // Dynamic Premium ATM Card Themes
+                    const palettes = [
+                        { base: '#d85d40', p1: '#de6245', p2: '#e97356', p3: '#c95337', p4: '#df6649', p5: '#f08368', line: '#fce4de' }, // Coral (Reference)
+                        { base: '#152238', p1: '#192942', p2: '#233959', p3: '#0b1424', p4: '#1d2f4d', p5: '#2d486d', line: '#85a4d1' }, // Deep Blue
+                        { base: '#701022', p1: '#801025', p2: '#9b1832', p3: '#540816', p4: '#8b1328', p5: '#b3203f', line: '#f2a7b6' }, // Burgundy
+                        { base: '#0b3d2c', p1: '#0e4a36', p2: '#146349', p3: '#05291d', p4: '#10543e', p5: '#1a7d5d', line: '#95dbbe' }  // Emerald
+                    ];
+                    const t = palettes[index % palettes.length];
 
                     return `
-                        <div class="bg-black/40 border border-white/10 rounded-2xl p-5 flex flex-col justify-between shadow-inner">
-                            <div class="mb-4">
-                                <div class="flex items-center justify-between mb-2">
-                                    <h3 class="font-display font-bold text-white text-base truncate pr-2">${plan.name}</h3>
-                                    ${roiBadge}
+                        <div class="relative w-full rounded-xl sm:rounded-2xl p-4 sm:p-5 flex flex-col shadow-2xl overflow-hidden group transition-transform duration-300 hover:-translate-y-1" style="aspect-ratio: 1.586 / 1; background-color: ${t.base};">
+                            
+                            <!-- Intersecting Geometric Polygon Pattern -->
+                            <svg class="absolute inset-0 w-full h-full z-0" preserveAspectRatio="none" viewBox="0 0 100 100">
+                                <polygon points="0,0 35,0 20,40 0,25" fill="${t.p1}" />
+                                <polygon points="35,0 100,0 100,30 65,50 20,40" fill="${t.p2}" />
+                                <polygon points="0,25 20,40 25,100 0,100" fill="${t.p3}" />
+                                <polygon points="20,40 65,50 80,100 25,100" fill="${t.p4}" />
+                                <polygon points="65,50 100,30 100,100 80,100" fill="${t.p5}" />
+                                
+                                <line x1="35" y1="0" x2="20" y2="40" stroke="${t.line}" stroke-width="0.25" opacity="0.35"/>
+                                <line x1="20" y1="40" x2="65" y2="50" stroke="${t.line}" stroke-width="0.25" opacity="0.35"/>
+                                <line x1="65" y1="50" x2="100" y2="30" stroke="${t.line}" stroke-width="0.25" opacity="0.35"/>
+                                <line x1="0" y1="25" x2="20" y2="40" stroke="${t.line}" stroke-width="0.25" opacity="0.35"/>
+                                <line x1="20" y1="40" x2="25" y2="100" stroke="${t.line}" stroke-width="0.25" opacity="0.35"/>
+                                <line x1="65" y1="50" x2="80" y2="100" stroke="${t.line}" stroke-width="0.25" opacity="0.35"/>
+                            </svg>
+
+                            <!-- Glossy Surface Reflection -->
+                            <div class="absolute inset-0 bg-gradient-to-tr from-white/0 via-white/10 to-white/0 pointer-events-none z-0"></div>
+
+                            <!-- Top Section with Glowing Purchase Button -->
+                            <div class="relative z-20 flex justify-between items-start">
+                                <div class="font-medium text-[11px] sm:text-xs text-white/90 lowercase tracking-wide drop-shadow-sm ml-1 truncate max-w-[80px] sm:max-w-[100px]">${plan.name}</div>
+                                
+                                <!-- Distinct Glowing Purchase Button -->
+                                <div class="absolute left-1/2 -translate-x-1/2 -top-1">
+                                     <button id="btn-invest-${plan.id}" onclick="AppController.purchaseInvestment('${plan.id}')" 
+                                        class="px-3 sm:px-4 py-1 sm:py-1.5 rounded-full bg-white/20 backdrop-blur-md text-white text-[8px] sm:text-[9px] font-black uppercase tracking-widest border-2 border-white/80 shadow-[0_0_12px_rgba(255,255,255,0.7),inset_0_0_8px_rgba(255,255,255,0.3)] hover:shadow-[0_0_20px_rgba(255,255,255,0.9),inset_0_0_12px_rgba(255,255,255,0.5)] hover:bg-white/30 hover:scale-105 active:scale-95 transition-all ${isMaint ? 'opacity-50 cursor-not-allowed' : ''}" 
+                                        ${isMaint ? 'disabled' : ''}>
+                                        ${isMaint ? 'PAUSED' : 'PURCHASE PLAN'}
+                                     </button>
                                 </div>
-                                <div class="flex flex-col gap-1.5">
-                                    <div class="flex justify-between items-center text-xs">
-                                        <span class="text-stone-400">Invest Amount:</span>
-                                        <span class="font-mono font-bold text-white">${curr}${Number(plan.cost).toFixed(2)}</span>
-                                    </div>
-                                    <div class="flex justify-between items-center text-xs">
-                                        <span class="text-stone-400">Total Return:</span>
-                                        <span class="font-mono font-bold text-royal-gold">${curr}${Number(plan.returnAmount).toFixed(2)}</span>
-                                    </div>
-                                    <div class="flex justify-between items-center text-xs">
-                                        <span class="text-stone-400">Duration:</span>
-                                        <span class="font-bold text-white">${plan.durationDays} Days</span>
-                                    </div>
+
+                                <div class="px-2 py-0.5 rounded text-[8px] sm:text-[9px] font-bold bg-white/20 text-white border border-white/30 backdrop-blur-md shadow-sm">${roiBadge}</div>
+                            </div>
+
+                            <!-- Middle Section: Chip & Hologram -->
+                            <div class="relative z-10 flex items-center justify-between mt-5 sm:mt-7 px-1 pointer-events-none">
+                                <div class="w-9 h-6 sm:w-11 sm:h-8 rounded-[4px] bg-gradient-to-br from-[#ffe58f] via-[#ffc72c] to-[#d4af37] border border-[#a67c00] shadow-sm flex flex-col items-center justify-evenly overflow-hidden relative">
+                                    <div class="absolute inset-x-0 top-1/2 -translate-y-1/2 h-[0.5px] bg-[#a67c00]/60"></div>
+                                    <div class="absolute inset-y-0 left-1/3 -translate-x-1/2 w-[0.5px] bg-[#a67c00]/60"></div>
+                                    <div class="absolute inset-y-0 right-1/3 translate-x-1/2 w-[0.5px] bg-[#a67c00]/60"></div>
+                                    <div class="absolute w-4 h-2.5 sm:w-5 sm:h-3 border border-[#a67c00]/50 rounded-[2px]"></div>
+                                </div>
+                                
+                                <div class="w-8 h-5 sm:w-11 sm:h-7 rounded-full bg-gradient-to-br from-gray-100 via-gray-300 to-gray-400 opacity-90 border border-white/50 shadow-inner flex items-center justify-center">
+                                    <div class="w-5 h-2.5 sm:w-6 sm:h-3 rounded-full bg-gradient-to-tr from-blue-300 via-purple-300 to-pink-300 opacity-60 mix-blend-multiply"></div>
                                 </div>
                             </div>
-                            <button id="btn-invest-${plan.id}" onclick="AppController.purchaseInvestment('${plan.id}')" 
-                                class="w-full py-2.5 rounded-xl btn-gold-gradient text-xs font-bold transition ${isMaint ? 'opacity-50 cursor-not-allowed' : ''}" 
-                                ${isMaint ? 'disabled' : ''}>
-                                ${isMaint ? 'PAUSED' : 'Purchase Plan'}
-                            </button>
+
+                            <!-- Embossed Center Section: Investment Details -->
+                            <div class="relative z-10 mt-auto flex flex-col px-1 pointer-events-none">
+                                <div class="flex items-center gap-4 sm:gap-6 mb-1.5">
+                                    <div class="flex flex-col">
+                                        <div class="font-mono text-sm sm:text-[17px] font-bold text-white tracking-widest leading-none" style="text-shadow: 1px 1px 2px rgba(0,0,0,0.6), -1px -1px 0px rgba(255,255,255,0.2);">${curr}${Number(plan.cost).toFixed(0)}</div>
+                                        <div class="text-[7px] sm:text-[8px] text-white/70 uppercase font-bold tracking-widest mt-1">Invest Amount</div>
+                                    </div>
+                                    <div class="flex flex-col">
+                                        <div class="font-mono text-sm sm:text-[17px] font-bold text-white tracking-widest leading-none" style="text-shadow: 1px 1px 2px rgba(0,0,0,0.6), -1px -1px 0px rgba(255,255,255,0.2);">${curr}${Number(plan.returnAmount).toFixed(0)}</div>
+                                        <div class="text-[7px] sm:text-[8px] text-white/70 uppercase font-bold tracking-widest mt-1">Total Return</div>
+                                    </div>
+                                </div>
+                                <div class="flex items-center gap-2 mb-1">
+                                    <div class="text-[7px] sm:text-[8px] text-white/70 uppercase font-bold tracking-widest">Valid Thru:</div>
+                                    <div class="font-mono text-[9px] sm:text-[11px] font-bold text-white tracking-widest" style="text-shadow: 1px 1px 2px rgba(0,0,0,0.6), -1px -1px 0px rgba(255,255,255,0.2);">${plan.durationDays} DAYS</div>
+                                </div>
+                            </div>
+
+                            <!-- Bottom Section: Name & Mastercard Logo -->
+                            <div class="relative z-10 flex items-center justify-between mt-auto px-1 pointer-events-none">
+                                <div class="font-mono text-[9px] sm:text-[11px] text-white/90 uppercase tracking-widest truncate max-w-[65%]" style="text-shadow: 1px 1px 2px rgba(0,0,0,0.6);">${plan.name}</div>
+                                
+                                <div class="flex items-center mix-blend-screen opacity-90 drop-shadow-md">
+                                    <div class="w-6 h-6 sm:w-7 sm:h-7 rounded-full bg-[#eb001b] z-10"></div>
+                                    <div class="w-6 h-6 sm:w-7 sm:h-7 rounded-full bg-[#f79e1b] -ml-2.5 sm:-ml-3 z-0"></div>
+                                </div>
+                            </div>
                         </div>
                     `;
                 }).join('');
             }
         }
 
+        // ==========================================
+        // MY ACTIVE PORTFOLIO UI REDESIGN
+        // ==========================================
         const portTbody = document.getElementById('invest-portfolio-tbody');
         if (portTbody) {
             const userInvests = (state.investments || []).filter(inv => inv.userId === state.currentUser?.id);
             if (userInvests.length === 0) {
-                portTbody.innerHTML = `<tr><td colspan="5" class="py-6 text-center text-stone-400 text-xs">You have no active synthetic plans.</td></tr>`;
+                portTbody.innerHTML = `<tr><td colspan="5" class="py-8 text-center text-stone-400 text-sm bg-black/20 rounded-xl border border-white/5">You have no active synthetic plans.</td></tr>`;
             } else {
                 portTbody.innerHTML = userInvests.map(inv => {
                     const isCompleted = inv.status === 'Completed';
                     let dateContent = '';
                     if (isCompleted) {
-                        dateContent = `<span class="text-emerald-400 font-bold">Completed</span>`;
+                        dateContent = `<span class="text-emerald-400 font-bold drop-shadow-[0_0_5px_rgba(52,211,153,0.5)]">Completed</span>`;
                     } else if (inv.payoutFrequency === 'Daily') {
-                        dateContent = `<span class="text-amber-400 font-bold">${inv.completedPayouts}/${inv.durationDays} Payouts</span>`;
+                        dateContent = `<span class="text-amber-400 font-bold drop-shadow-[0_0_5px_rgba(251,191,36,0.5)]">${inv.completedPayouts}/${inv.durationDays} Payouts</span>`;
                     } else {
-                        dateContent = `<span class="investment-countdown font-mono text-amber-400 font-bold" data-maturity="${inv.maturityDate}">Loading...</span>`;
+                        dateContent = `<span class="investment-countdown font-mono text-amber-400 font-bold drop-shadow-[0_0_5px_rgba(251,191,36,0.5)]" data-maturity="${inv.maturityDate}">Loading...</span>`;
                     }
 
                     return `
-                        <tr class="hover:bg-white/[0.02] transition">
-                            <td class="py-3 px-3 font-semibold text-white text-xs">${inv.planName}</td>
-                            <td class="py-3 px-3 font-mono text-xs text-stone-300">${curr}${Number(inv.cost).toFixed(2)}</td>
-                            <td class="py-3 px-3 font-mono text-xs font-bold text-royal-gold">${curr}${Number(inv.returnAmount).toFixed(2)}</td>
-                            <td class="py-3 px-3 text-xs text-stone-300">${dateContent}</td>
-                            <td class="py-3 px-3 text-right">
-                                <span class="px-2.5 py-0.5 rounded-full text-[10px] font-bold ${isCompleted ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30' : 'bg-amber-500/20 text-amber-300 border-amber-500/30'} border">
+                        <tr class="group hover:bg-white/[0.04] transition-all duration-300 border-b border-white/5 last:border-0 relative">
+                            <!-- Premium Icon, Plan Name, and Purchase Time -->
+                            <td class="py-4 px-3 font-semibold text-white text-xs sm:text-sm flex items-center gap-3">
+                                <div class="w-9 h-6 rounded bg-gradient-to-br from-yellow-300 via-amber-500 to-yellow-600 border border-yellow-700/50 flex items-center justify-center shadow-[0_0_10px_rgba(245,158,11,0.2)] opacity-80 group-hover:opacity-100 group-hover:shadow-[0_0_15px_rgba(245,158,11,0.4)] transition-all shrink-0">
+                                    <div class="w-full h-1 bg-black/20 mt-2"></div>
+                                </div>
+                                <div class="flex flex-col min-w-0">
+                                    <span class="truncate max-w-[120px] sm:max-w-[200px] tracking-wide">${inv.planName}</span>
+                                    <span class="text-[9px] sm:text-[10px] text-gray-400 font-normal mt-0.5 tracking-wider">${inv.time}</span>
+                                </div>
+                            </td>
+                            
+                            <td class="py-4 px-3 font-mono text-xs sm:text-sm text-stone-300">${curr}${Number(inv.cost).toFixed(2)}</td>
+                            
+                            <!-- Glowing Expected Return -->
+                            <td class="py-4 px-3 font-mono text-xs sm:text-sm font-bold text-royal-gold text-glow-gold">${curr}${Number(inv.returnAmount).toFixed(2)}</td>
+                            
+                            <td class="py-4 px-3 text-[10px] sm:text-xs text-stone-300 tracking-wider">${dateContent}</td>
+                            
+                            <!-- Upgraded Status Badge -->
+                            <td class="py-4 px-3 text-right">
+                                <span class="px-3 py-1.5 rounded-full text-[9px] sm:text-[10px] font-black uppercase tracking-widest ${isCompleted ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 shadow-[0_0_10px_rgba(52,211,153,0.15)]' : 'bg-amber-500/10 text-amber-400 border border-amber-500/30 shadow-[0_0_10px_rgba(251,191,36,0.15)]'}">
                                     ${inv.status}
                                 </span>
                             </td>
