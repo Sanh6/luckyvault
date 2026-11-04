@@ -970,6 +970,7 @@ const AppController = (() => {
     let isBoxOpening = false;
     let isSlotSpinning = false;
     let isPurchasingInvestment = false;
+    let pendingPurchasePlanId = null;
     let chatPollInterval = null;
     let pendingPasswordResetUser = null;
 
@@ -1883,25 +1884,71 @@ const AppController = (() => {
             }
         }
     };
+    const purchaseInvestment = (planId) => {
+        const state = ApiClient.getState();
+        const plan = (state.investmentPlans || []).find(p => p.id === planId);
+        if (!plan) return;
 
-    const purchaseInvestment = async (planId) => {
-        if (isPurchasingInvestment) return;
-        const btnId = `btn-invest-${planId}`;
-        const btn = document.getElementById(btnId);
+        pendingPurchasePlanId = planId;
+        const curr = state.settings.currency || '₦';
+
+        // Dynamically create the confirmation modal if it doesn't exist
+        let modal = document.getElementById('modal-confirm-purchase');
+        if (!modal) {
+            modal = document.createElement('div');
+            modal.id = 'modal-confirm-purchase';
+            modal.className = 'fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/90 backdrop-blur-md hidden';
+            modal.innerHTML = `
+                <div class="vault-card rounded-3xl w-full max-w-sm p-6 relative border border-royal-gold/30 shadow-[0_0_40px_rgba(255,215,0,0.1)] text-center">
+                    <button onclick="AppController.closePurchaseConfirmModal()" class="absolute top-4 right-4 w-8 h-8 rounded-full bg-espresso-900 border border-white/10 flex items-center justify-center text-gray-400 hover:text-white transition">
+                        <i class="fa-solid fa-xmark"></i>
+                    </button>
+                    <div class="w-12 h-12 rounded-full bg-royal-gold/10 flex items-center justify-center mx-auto mb-4 border border-royal-gold/20">
+                        <i class="fa-solid fa-cart-shopping text-royal-gold text-xl drop-shadow-[0_0_8px_rgba(255,215,0,0.8)]"></i>
+                    </div>
+                    <h2 class="font-display font-extrabold text-xl text-white mb-2">Confirm Purchase</h2>
+                    <p class="text-sm text-gray-300 mb-6">Are you sure you want to purchase the <strong id="confirm-plan-name" class="text-white"></strong> plan for <strong id="confirm-plan-cost" class="text-royal-gold"></strong>?</p>
+                    <div class="flex gap-3">
+                        <button onclick="AppController.closePurchaseConfirmModal()" class="flex-1 py-3 rounded-xl bg-espresso-800 border border-white/10 text-white font-bold hover:bg-espresso-700 transition shadow-inner">Cancel</button>
+                        <button onclick="AppController.executePurchaseInvestment()" id="btn-confirm-purchase-exec" class="flex-1 py-3 rounded-xl btn-gold-gradient font-bold transition flex items-center justify-center">Confirm</button>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(modal);
+        }
+
+        // Update modal values and show
+        document.getElementById('confirm-plan-name').textContent = plan.name;
+        document.getElementById('confirm-plan-cost').textContent = `${curr}${Number(plan.cost).toFixed(2)}`;
+        modal.classList.remove('hidden');
+    };
+
+    const closePurchaseConfirmModal = () => {
+        const modal = document.getElementById('modal-confirm-purchase');
+        if (modal) modal.classList.add('hidden');
+        pendingPurchasePlanId = null;
+    };
+
+    const executePurchaseInvestment = async () => {
+        if (!pendingPurchasePlanId || isPurchasingInvestment) return;
+        const planId = pendingPurchasePlanId;
+        const execBtn = document.getElementById('btn-confirm-purchase-exec');
 
         try {
             isPurchasingInvestment = true;
-            if (btn) {
-                btn.disabled = true;
-                btn.innerHTML = `<i class="fa-solid fa-circle-notch fa-spin"></i> Processing...`;
+            if (execBtn) {
+                execBtn.disabled = true;
+                execBtn.innerHTML = `<i class="fa-solid fa-circle-notch fa-spin"></i>`;
             }
 
             const investment = await ApiClient.purchaseInvestmentPlan(planId);
 
+            closePurchaseConfirmModal();
             ConfettiEngine.launch();
             showToast(`Successfully purchased ${investment.planName}!`, 'success');
             syncAllViews();
         } catch (err) {
+            closePurchaseConfirmModal();
             showToast(err.message, 'error');
             if (err.message.toLowerCase().includes('insufficient')) {
                 openRechargeModal();
@@ -1910,13 +1957,14 @@ const AppController = (() => {
             }
         } finally {
             isPurchasingInvestment = false;
-            if (btn) {
-                btn.disabled = false;
-                btn.innerHTML = `Purchase Plan`; // Will be synced anyway
-                syncAllViews();
+            if (execBtn) {
+                execBtn.disabled = false;
+                execBtn.innerHTML = `Confirm`;
             }
+            syncAllViews();
         }
     };
+
     const syncAllViews = () => {
         ensureSlotMachineDOM();
         ensureInvestmentDOM();
@@ -2162,7 +2210,7 @@ const AppController = (() => {
                 const distance = maturity - now;
 
                 if (distance <= 0) {
-                    el.innerHTML = '<span class="text-emerald-400">Processing...</span>';
+                    el.innerHTML = '<span class="text-emerald-400 drop-shadow-[0_0_5px_rgba(52,211,153,0.5)]">Processing...</span>';
                     el.classList.remove('investment-countdown');
                 } else {
                     const days = Math.floor(distance / (1000 * 60 * 60 * 24));
@@ -2348,6 +2396,7 @@ const AppController = (() => {
 
         startInvestmentCountdowns();
     };
+
     const renderPlayerHistory = () => {
         const tbody = document.getElementById('player-history-tbody');
         if (!tbody) return;
@@ -2621,7 +2670,6 @@ const AppController = (() => {
             showToast(err.message, 'error');
         }
     };
-
 
     const renderAdminUsers = () => {
         const tbody = document.getElementById('admin-users-tbody');
@@ -3916,6 +3964,8 @@ const AppController = (() => {
         selectMysteryBoxTier,
         openMysteryBox,
         purchaseInvestment,
+        closePurchaseConfirmModal,
+        executePurchaseInvestment,
         filterPlayerHistory,
         openRechargeModal,
         closeRechargeModal,
