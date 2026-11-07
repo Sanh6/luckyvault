@@ -244,7 +244,8 @@ const getReferenceWheelSegments = () => [
     { id: 5, label: '₦200', value: 200.00, color: '#ea691c', weight: 10 },
     { id: 6, label: '₦300', value: 300.00, color: '#1565c0', weight: 5 },
     { id: 7, label: '₦5000', value: 5000.00, color: '#278a3f', weight: 1 },
-    { id: 8, label: '₦0', value: 0.00, color: '#111111', weight: 40 }
+    { id: 8, label: '₦0', value: 0.00, color: '#111111', weight: 40 },
+    { id: 9, label: '₦50,000', value: 50000.00, color: '#9333ea', weight: 0 }
 ];
 
 const getReferenceSlotPayouts = () => [
