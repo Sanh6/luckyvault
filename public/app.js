@@ -107,6 +107,12 @@ const ApiClient = (() => {
             soundEnabled: true,
             bankDetails: { bankName: 'Loading...', accountNumber: 'Loading...', accountName: 'Loading...' }
         },
+        referralConfig: {
+            available: true,
+            level1Percent: 10,
+            level2Percent: 3,
+            level3Percent: 1
+        },
         currentUser: null,
         users: [],
         investmentPlans: [],
@@ -298,10 +304,10 @@ const ApiClient = (() => {
             return { user: state.currentUser, redirectRole: data.redirectRole };
         },
 
-        registerUser: async ({ name, email, phone, password }) => {
+        registerUser: async ({ name, email, phone, password, referredBy }) => {
             const data = await apiRequest('/auth/register', {
                 method: 'POST',
-                body: JSON.stringify({ name, email, phone, password })
+                body: JSON.stringify({ name, email, phone, password, referredBy })
             });
             if (data.token) {
                 authToken = data.token;
@@ -589,10 +595,10 @@ const ApiClient = (() => {
             return data.txStatus;
         },
 
-        saveAppSettings: async (settings) => {
+        saveAppSettings: async (settings, referralConfig) => {
             const data = await apiRequest('/admin/settings', {
                 method: 'PUT',
-                body: JSON.stringify({ settings })
+                body: JSON.stringify({ settings, referralConfig })
             });
             applyServerState(data.state);
         }
@@ -957,7 +963,6 @@ const ConfettiEngine = (() => {
 
     return { launch };
 })();
-
 /**
  * ====================================================================
  * LAYER 4: Main Application Controller & UI Renderer
@@ -2041,6 +2046,18 @@ const AppController = (() => {
             if (adminPortalBtn) {
                 adminPortalBtn.classList.toggle('hidden', user.role !== 'admin');
             }
+
+            // Affiliate / Referral Hub population
+            const affiliateLinkEl = document.getElementById('affiliate-referral-link');
+            const affiliateEarnEl = document.getElementById('stat-affiliate-earnings');
+            const affiliateCountEl = document.getElementById('stat-affiliate-count');
+
+            if (affiliateLinkEl) {
+                const refUrl = `${window.location.origin}${window.location.pathname}?ref=${user.referralCode}`;
+                affiliateLinkEl.value = refUrl;
+            }
+            if (affiliateEarnEl) affiliateEarnEl.textContent = `${curr}${Number(user.referralEarnings || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+            if (affiliateCountEl) affiliateCountEl.textContent = user.referralsCount || 0;
         }
 
         const spinCost = Number(state.wheelConfig.spinCost || 250);
@@ -2190,6 +2207,19 @@ const AppController = (() => {
         renderPlayerHistory();
         if (user && user.role === 'admin') {
             renderAdminPortal();
+        }
+
+        // Admin Settings panel: populate referral configurations
+        if (state.referralConfig) {
+            const setVal = (id, val) => {
+                const el = document.getElementById(id);
+                if (el && document.activeElement !== el) el.value = val;
+            };
+            setVal('set-ref-lvl1', state.referralConfig.level1Percent);
+            setVal('set-ref-lvl2', state.referralConfig.level2Percent);
+            setVal('set-ref-lvl3', state.referralConfig.level3Percent);
+            const refCheck = document.getElementById('set-ref-active');
+            if (refCheck) refCheck.checked = Boolean(state.referralConfig.available);
         }
     };
 
@@ -2426,7 +2456,8 @@ const AppController = (() => {
                 RECHARGE: `<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-500/15 text-emerald-300 text-xs font-semibold"><i class="fa-solid fa-wallet"></i>Recharge</span>`,
                 WITHDRAWAL: `<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-royal-pink/15 text-pink-300 text-xs font-semibold"><i class="fa-solid fa-money-bill-transfer"></i>Withdraw</span>`,
                 INVEST_BUY: `<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-sky-500/15 text-sky-300 text-xs font-semibold"><i class="fa-solid fa-chart-line"></i>Synthetic</span>`,
-                INVEST_PAYOUT: `<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-500/15 text-emerald-300 text-xs font-semibold"><i class="fa-solid fa-hand-holding-dollar"></i>Payout</span>`
+                INVEST_PAYOUT: `<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-500/15 text-emerald-300 text-xs font-semibold"><i class="fa-solid fa-hand-holding-dollar"></i>Payout</span>`,
+                REFERRAL_COMMISSION: `<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-purple-500/15 text-purple-300 text-xs font-semibold"><i class="fa-solid fa-users"></i>Referral</span>`
             };
 
             let statusBadge;
@@ -3511,6 +3542,7 @@ const AppController = (() => {
         const phone = document.getElementById('reg-phone').value.trim();
         const password = document.getElementById('reg-password').value;
         const terms = document.getElementById('reg-terms').checked;
+        const referredBy = document.getElementById('reg-referral')?.value.trim() || null;
 
         const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
         const phoneOk = phone.replace(/\D/g, '').length >= 7;
@@ -3532,7 +3564,7 @@ const AppController = (() => {
         btn.innerHTML = `<i class="fa-solid fa-circle-notch fa-spin"></i><span>CREATING ACCOUNT...</span>`;
 
         try {
-            const res = await ApiClient.registerUser({ name, email, phone, password });
+            const res = await ApiClient.registerUser({ name, email, phone, password, referredBy });
             ConfettiEngine.launch();
             showToast(`Welcome to LuckyVault, ${res.user.name}!`, 'success');
             switchMainView('player');
@@ -3887,7 +3919,13 @@ const AppController = (() => {
                     accountName: document.getElementById('set-bank-holder')?.value.trim() || ''
                 }
             };
-            await ApiClient.saveAppSettings(settings);
+            const referralConfig = {
+                available: Boolean(document.getElementById('set-ref-active')?.checked),
+                level1Percent: Number(document.getElementById('set-ref-lvl1')?.value || 0),
+                level2Percent: Number(document.getElementById('set-ref-lvl2')?.value || 0),
+                level3Percent: Number(document.getElementById('set-ref-lvl3')?.value || 0)
+            };
+            await ApiClient.saveAppSettings(settings, referralConfig);
             showToast('Application settings saved.', 'success');
             syncAllViews();
         } catch (err) {
@@ -3910,6 +3948,18 @@ const AppController = (() => {
 
     return {
         init: async () => {
+            const urlParams = new URLSearchParams(window.location.search);
+            const refCode = urlParams.get('ref');
+            if (refCode) {
+                setTimeout(() => {
+                    const regRefInput = document.getElementById('reg-referral');
+                    if (regRefInput) {
+                        regRefInput.value = refCode;
+                        switchAuthTab('register');
+                    }
+                }, 100);
+            }
+
             ensureSlotMachineDOM();
             ensureInvestmentDOM();
             ensureAdminChatDOM();
@@ -4006,7 +4056,19 @@ const AppController = (() => {
         sendPlayerChatMessage,
         handleGuestChatSubmit,
         selectAdminChatSession,
-        sendAdminChatMessage
+        sendAdminChatMessage,
+        copyReferralLink: async () => {
+            const linkInput = document.getElementById('affiliate-referral-link');
+            if (!linkInput) return;
+            try {
+                await navigator.clipboard.writeText(linkInput.value);
+                showToast('Referral link copied to clipboard!', 'success');
+            } catch (err) {
+                linkInput.select();
+                document.execCommand('copy');
+                showToast('Referral link copied to clipboard!', 'success');
+            }
+        }
     };
 })();
 

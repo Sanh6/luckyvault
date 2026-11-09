@@ -464,6 +464,10 @@
                         </div>
                     </div>
 
+                    <div class="hidden">
+                        <input type="text" id="reg-referral" placeholder="Referral Code">
+                    </div>
+
                     <div>
                         <label
                             class="block text-[10px] sm:text-xs font-semibold uppercase tracking-wider text-gray-300 mb-1 sm:mb-1.5">Email
@@ -717,8 +721,56 @@
                 </div>
             </div>
 
+            <!-- Affiliate / Referral Hub -->
+            <div class="vault-card rounded-3xl p-5 sm:p-6 mt-6">
+                <div class="flex items-center justify-between mb-4">
+                    <div>
+                        <h2 class="font-display font-extrabold text-lg sm:text-xl text-white flex items-center gap-2">
+                            <i class="fa-solid fa-network-wired text-sky-400"></i> AFFILIATE NETWORK
+                        </h2>
+                        <p class="text-[11px] sm:text-xs text-gray-400 mt-0.5">Earn commissions across 3 tiers for every
+                            synthetic plan purchased.</p>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 items-center">
+                    <div class="space-y-4">
+                        <div>
+                            <label class="block text-[11px] uppercase font-semibold text-gray-400 mb-1.5">Your Unique
+                                Referral Link</label>
+                            <div class="flex items-center gap-2">
+                                <input type="text" id="affiliate-referral-link" readonly
+                                    class="w-full px-4 py-3 rounded-xl bg-black/60 border border-white/10 text-xs sm:text-sm font-mono text-royal-gold focus:outline-none shadow-inner"
+                                    value="Loading...">
+                                <button onclick="AppController.copyReferralLink()"
+                                    class="px-4 py-3 rounded-xl btn-gold-gradient text-espresso-950 font-bold hover:scale-105 transition shrink-0">
+                                    <i class="fa-solid fa-copy"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-3">
+                        <div
+                            class="bg-black/60 border border-white/10 rounded-2xl p-4 shadow-inner flex flex-col items-center justify-center text-center">
+                            <span class="text-[10px] text-gray-400 uppercase font-bold tracking-wider mb-1">Direct
+                                Referrals</span>
+                            <span id="stat-affiliate-count"
+                                class="font-display font-extrabold text-2xl text-white">0</span>
+                        </div>
+                        <div
+                            class="bg-black/60 border border-white/10 rounded-2xl p-4 shadow-inner flex flex-col items-center justify-center text-center">
+                            <span class="text-[10px] text-gray-400 uppercase font-bold tracking-wider mb-1">Total
+                                Earnings</span>
+                            <span id="stat-affiliate-earnings"
+                                class="font-display font-extrabold text-xl text-sky-400 text-glow-emerald truncate max-w-full">₦0.00</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <!-- Games Arena -->
-            <div id="games-arena-grid" class="grid grid-cols-1 xl:grid-cols-12 gap-6">
+            <div id="games-arena-grid" class="grid grid-cols-1 xl:grid-cols-12 gap-6 mt-6">
 
                 <!-- 777 Jackpot Slots Section -->
                 <section id="player-sec-slot"
@@ -1715,6 +1767,46 @@
                                         class="w-4 h-4 rounded bg-black border-white/10 text-royal-gold focus:ring-royal-gold focus:ring-offset-0">
                                     <span class="text-sm text-gray-300">Auto-Approve Recharges</span>
                                 </label>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Multi-Tier Referral Configuration -->
+                    <div class="vault-card rounded-3xl p-5 sm:p-6 mt-6 md:mt-0">
+                        <h3 class="font-display font-bold text-lg text-white mb-4 flex items-center gap-2">
+                            <i class="fa-solid fa-sitemap text-sky-400"></i> Referral Commissions
+                        </h3>
+                        <div class="space-y-4">
+                            <div class="grid grid-cols-3 gap-3">
+                                <div>
+                                    <label class="block text-[10px] font-semibold text-gray-400 mb-1.5 uppercase">Level
+                                        1 (%)</label>
+                                    <input type="number" id="set-ref-lvl1" step="0.1" min="0" max="100"
+                                        class="w-full px-4 py-2.5 rounded-xl bg-black/60 border border-sky-500/30 text-sm text-white font-mono focus:outline-none focus:border-sky-400 shadow-inner">
+                                </div>
+                                <div>
+                                    <label class="block text-[10px] font-semibold text-gray-400 mb-1.5 uppercase">Level
+                                        2 (%)</label>
+                                    <input type="number" id="set-ref-lvl2" step="0.1" min="0" max="100"
+                                        class="w-full px-4 py-2.5 rounded-xl bg-black/60 border border-sky-500/20 text-sm text-white font-mono focus:outline-none focus:border-sky-400 shadow-inner">
+                                </div>
+                                <div>
+                                    <label class="block text-[10px] font-semibold text-gray-400 mb-1.5 uppercase">Level
+                                        3 (%)</label>
+                                    <input type="number" id="set-ref-lvl3" step="0.1" min="0" max="100"
+                                        class="w-full px-4 py-2.5 rounded-xl bg-black/60 border border-sky-500/10 text-sm text-white font-mono focus:outline-none focus:border-sky-400 shadow-inner">
+                                </div>
+                            </div>
+                            <div class="pt-3 border-t border-white/5">
+                                <label class="flex items-center gap-3 cursor-pointer">
+                                    <input type="checkbox" id="set-ref-active"
+                                        class="w-4 h-4 rounded bg-black border-white/10 text-sky-400 focus:ring-sky-400 focus:ring-offset-0">
+                                    <span class="text-sm text-gray-300 font-semibold">Enable Referral System</span>
+                                </label>
+                                <p class="text-[10px] text-gray-500 mt-2 leading-relaxed">
+                                    Commissions are calculated automatically upon downline synthetic plan purchases and
+                                    credited directly to the sponsor's wallet as an actionable balance.
+                                </p>
                             </div>
                         </div>
                     </div>
