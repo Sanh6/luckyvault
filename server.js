@@ -61,6 +61,8 @@ const UserSchema = new mongoose.Schema({
     slotsCount: { type: Number, default: 0 },
     totalWon: { type: Number, default: 0 },
     games: { type: Number, default: 0 },
+    referredBy: { type: String, default: null, index: true },
+    referralEarnings: { type: Number, default: 0 },
     bankDetails: {
         bankName: { type: String, default: '' },
         accountNumber: { type: String, default: '' },
@@ -72,7 +74,7 @@ const TransactionSchema = new mongoose.Schema({
     txId: { type: String, required: true, unique: true, index: true },
     userId: { type: String, required: true, index: true },
     user: { type: String, required: true },
-    type: { type: String, enum: ['SPIN', 'BOX', 'SLOT', 'RECHARGE', 'WITHDRAWAL', 'INVEST_BUY', 'INVEST_PAYOUT'], required: true },
+    type: { type: String, enum: ['SPIN', 'BOX', 'SLOT', 'RECHARGE', 'WITHDRAWAL', 'INVEST_BUY', 'INVEST_PAYOUT', 'REFERRAL_COMMISSION'], required: true },
     desc: { type: String, required: true },
     cost: { type: Number, default: 0 },
     credit: { type: Number, default: 0 },
@@ -152,6 +154,12 @@ const PlatformConfigSchema = new mongoose.Schema({
             accountNumber: { type: String, default: '1234567890' },
             accountName: { type: String, default: 'LuckyVault Gaming' }
         }
+    },
+    referralConfig: {
+        available: { type: Boolean, default: true },
+        level1Percent: { type: Number, default: 10 },
+        level2Percent: { type: Number, default: 3 },
+        level3Percent: { type: Number, default: 1 }
     },
     wheelConfig: {
         available: { type: Boolean, default: true },
@@ -565,6 +573,7 @@ async function initializePlatform() {
                 soundEnabled: true,
                 bankDetails: { bankName: 'Moniepoint MFB', accountNumber: '1234567890', accountName: 'LuckyVault Gaming' }
             },
+            referralConfig: { available: true, level1Percent: 10, level2Percent: 3, level3Percent: 1 },
             wheelConfig: { available: true, spinCost: 250.00, segments: getReferenceWheelSegments() },
             spinState: getDefaultSpinState(),
             slotConfig: { available: true, spinCost: 250.00, payouts: getReferenceSlotPayouts() },
@@ -595,6 +604,13 @@ async function initializePlatform() {
                 config.settings.bankDetails = { bankName: 'Moniepoint MFB', accountNumber: '1234567890', accountName: 'LuckyVault Gaming' };
                 needsMigration = true;
             }
+        }
+
+        if (!config.referralConfig) {
+            config.referralConfig = { available: true, level1Percent: 10, level2Percent: 3, level3Percent: 1 };
+            config.markModified('referralConfig');
+            needsMigration = true;
+            console.log('✅ Initialized default Referral configuration.');
         }
 
         if (ensureValidSpinState(config)) {
@@ -767,7 +783,7 @@ const requireChatAccess = async (req, res, next) => {
 };
 
 // ====================================================================
-// 4. HELPER FUNCTIONS (Weighted Server RNG & State Formatter)
+// 4. HELPER FUNCTIONS (Weighted Server RNG, State Formatter & Referral Engine)
 // ====================================================================
 
 function shuffleArray(array) {
@@ -803,6 +819,50 @@ function formatTransaction(t) {
     };
 }
 
+async function distributeReferralCommission(userId, amount) {
+    const config = await PlatformConfig.findOne({ singletonKey: 'GLOBAL_CONFIG' }).lean();
+    if (!config || !config.referralConfig || !config.referralConfig.available) return;
+
+    const user = await User.findOne({ userId });
+    if (!user || !user.referredBy) return;
+
+    const levels = [
+        config.referralConfig.level1Percent || 0,
+        config.referralConfig.level2Percent || 0,
+        config.referralConfig.level3Percent || 0
+    ];
+
+    let currentUser = user;
+    for (let i = 0; i < 3; i++) {
+        if (!currentUser.referredBy) break;
+
+        const referrer = await User.findOne({ userId: currentUser.referredBy });
+        if (!referrer) break;
+
+        const percent = levels[i];
+        if (percent > 0) {
+            const commission = Number((amount * (percent / 100)).toFixed(2));
+            if (commission > 0) {
+                referrer.balance = Number((referrer.balance + commission).toFixed(2));
+                referrer.referralEarnings = Number(((referrer.referralEarnings || 0) + commission).toFixed(2));
+                await referrer.save();
+
+                await Transaction.create({
+                    txId: generateId('TX'),
+                    userId: referrer.userId,
+                    user: referrer.name,
+                    type: 'REFERRAL_COMMISSION',
+                    desc: `Level ${i + 1} Referral Commission (${percent}%) from ${user.name}`,
+                    cost: 0,
+                    credit: commission,
+                    status: 'Completed'
+                });
+            }
+        }
+        currentUser = referrer;
+    }
+}
+
 async function buildUserState(userDoc) {
     const config = await PlatformConfig.findOne({ singletonKey: 'GLOBAL_CONFIG' }).lean();
     const isAdmin = userDoc.role === 'admin';
@@ -830,6 +890,7 @@ async function buildUserState(userDoc) {
 
     return {
         settings: config.settings,
+        referralConfig: config.referralConfig || { available: true, level1Percent: 10, level2Percent: 3, level3Percent: 1 },
         currentUser: {
             id: userDoc.userId,
             name: userDoc.name,
@@ -842,6 +903,9 @@ async function buildUserState(userDoc) {
             boxesCount: userDoc.boxesCount || 0,
             slotsCount: userDoc.slotsCount || 0,
             totalWon: userDoc.totalWon || 0,
+            referralEarnings: userDoc.referralEarnings || 0,
+            referralCode: userDoc.userId,
+            referralsCount: await User.countDocuments({ referredBy: userDoc.userId }),
             bankDetails: {
                 bankName: userDoc.bankDetails?.bankName || '',
                 accountNumber: userDoc.bankDetails?.accountNumber || '',
@@ -894,6 +958,7 @@ app.get('/api/public/config', async (req, res) => {
         const activePlans = await InvestmentPlan.find({ isActive: true }).sort({ cost: 1 }).lean();
         res.json({
             settings: config.settings,
+            referralConfig: config.referralConfig || { available: true, level1Percent: 10, level2Percent: 3, level3Percent: 1 },
             wheelConfig: config.wheelConfig,
             slotConfig: config.slotConfig || { available: true, spinCost: 250.00, payouts: getReferenceSlotPayouts() },
             mysteryConfig: config.mysteryConfig,
@@ -981,7 +1046,7 @@ app.post('/api/auth/login', async (req, res) => {
 
 app.post('/api/auth/register', async (req, res) => {
     try {
-        const { name, email, phone, password } = req.body;
+        const { name, email, phone, password, referredBy } = req.body;
         const cleanEmail = String(email || '').toLowerCase().trim();
         const cleanPhone = String(phone || '').trim();
 
@@ -1019,6 +1084,11 @@ app.post('/api/auth/register', async (req, res) => {
         const rawName = String(name || cleanEmail.split('@')[0]).replace(/[^a-zA-Z0-9 ]/g, ' ').trim();
         const displayName = rawName ? rawName.charAt(0).toUpperCase() + rawName.slice(1) : 'Player';
 
+        let validReferrer = null;
+        if (referredBy) {
+            validReferrer = await User.findOne({ userId: String(referredBy).trim() });
+        }
+
         const newUser = await User.create({
             userId: newUserId,
             name: displayName,
@@ -1027,7 +1097,8 @@ app.post('/api/auth/register', async (req, res) => {
             passwordHash,
             role: 'player',
             status: 'Active',
-            balance: bonus
+            balance: bonus,
+            referredBy: validReferrer ? validReferrer.userId : null
         });
 
         if (bonus > 0) {
@@ -1308,6 +1379,8 @@ app.post('/api/investments/purchase', requireAuth, async (req, res) => {
             credit: 0,
             status: 'Completed'
         });
+
+        await distributeReferralCommission(updatedUser.userId, plan.cost);
 
         const state = await buildUserState(updatedUser);
         res.json({ investment: newInv, state });
@@ -1999,7 +2072,7 @@ app.patch('/api/admin/prizes/:txId/status', requireAuth, requireAdmin, async (re
 
 app.put('/api/admin/settings', requireAuth, requireAdmin, async (req, res) => {
     try {
-        const { settings } = req.body;
+        const { settings, referralConfig } = req.body;
         const config = await PlatformConfig.findOne({ singletonKey: 'GLOBAL_CONFIG' });
 
         config.settings = {
@@ -2007,9 +2080,19 @@ app.put('/api/admin/settings', requireAuth, requireAdmin, async (req, res) => {
             ...settings,
             bankDetails: {
                 ...config.settings.bankDetails,
-                ...(settings.bankDetails || {})
+                ...(settings?.bankDetails || {})
             }
         };
+
+        if (referralConfig) {
+            config.referralConfig = {
+                available: Boolean(referralConfig.available),
+                level1Percent: Number(referralConfig.level1Percent || 0),
+                level2Percent: Number(referralConfig.level2Percent || 0),
+                level3Percent: Number(referralConfig.level3Percent || 0)
+            };
+        }
+
         ensureValidSpinState(config);
         ensureValidSlotState(config);
         ensureValidMysteryState(config);
