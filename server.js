@@ -78,7 +78,10 @@ const TransactionSchema = new mongoose.Schema({
     desc: { type: String, required: true },
     cost: { type: Number, default: 0 },
     credit: { type: Number, default: 0 },
-    status: { type: String, enum: ['Credited', 'Completed', 'Pending', 'Flagged', 'Rejected'], default: 'Credited' }
+    status: { type: String, enum: ['Credited', 'Completed', 'Pending', 'Flagged', 'Rejected'], default: 'Credited' },
+    balanceCredited: { type: Boolean, default: false, index: true },
+    korapayReference: { type: String, default: null },
+    korapayPayload: { type: Object, default: null }
 }, { timestamps: true });
 
 const InvestmentPlanSchema = new mongoose.Schema({
@@ -139,6 +142,7 @@ const ChatMessageSchema = new mongoose.Schema({
 
 const PlatformConfigSchema = new mongoose.Schema({
     singletonKey: { type: String, default: 'GLOBAL_CONFIG', unique: true },
+    rechargeMigrationV1Done: { type: Boolean, default: false },
     settings: {
         currency: { type: String, default: '₦' },
         minRecharge: { type: Number, default: 1000 },
@@ -582,6 +586,8 @@ async function initializePlatform() {
             mysteryConfig: { available: true, activeBoxId: 'BOX-CLASSIC', boxes: getDefaultBoxes() }
         });
         console.log('✅ Initialized default PlatformConfig with NGN (₦) currency.');
+        // Reload so downstream migration block sees the freshly created config
+        config = await PlatformConfig.findOne({ singletonKey: 'GLOBAL_CONFIG' });
     } else {
         let needsMigration = false;
 
@@ -687,6 +693,25 @@ async function initializePlatform() {
         if (needsMigration) {
             await config.save();
             console.log('✅ Saved database configuration updates.');
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // One-time migration: mark pre-deploy Completed recharges as credited.
+    // This protects against double-crediting pre-existing transactions
+    // when the crash-recovery fallback in creditRechargeTransaction runs.
+    // ------------------------------------------------------------------
+    if (!config.rechargeMigrationV1Done) {
+        const migrationResult = await Transaction.updateMany(
+            { type: 'RECHARGE', status: 'Completed', balanceCredited: { $ne: true } },
+            { $set: { balanceCredited: true } }
+        );
+        config.rechargeMigrationV1Done = true;
+        await config.save();
+        if (migrationResult.modifiedCount > 0) {
+            console.log(`✅ Migration: marked ${migrationResult.modifiedCount} pre-existing Completed recharge(s) as balanceCredited=true.`);
+        } else {
+            console.log('✅ Migration: no pre-existing Completed recharges required backfill.');
         }
     }
 
@@ -860,6 +885,58 @@ async function distributeReferralCommission(userId, amount) {
             }
         }
         currentUser = referrer;
+    }
+}
+
+// --------------------------------------------------------------------
+// Helper: Atomic, Idempotent Recharge Crediting
+//
+// Two-phase lock prevents the classic "marked Completed but balance
+// never incremented" crash window. Also rescues transactions that a
+// prior process flipped to Rejected via processExpiredRecharges, and
+// recovers Completed-but-uncredited orphans from mid-write crashes.
+// --------------------------------------------------------------------
+async function creditRechargeTransaction(txRef) {
+    try {
+        // Phase 1: transition Pending/Rejected -> Completed (atomic)
+        let txDoc = await Transaction.findOneAndUpdate(
+            { txId: txRef, type: 'RECHARGE', status: { $in: ['Pending', 'Rejected'] } },
+            { $set: { status: 'Completed' } },
+            { new: true }
+        );
+
+        // Crash-recovery: if no Pending/Rejected row matched, look for a
+        // Completed transaction whose credit flag was never committed.
+        if (!txDoc) {
+            txDoc = await Transaction.findOne({
+                txId: txRef,
+                type: 'RECHARGE',
+                status: 'Completed',
+                balanceCredited: { $ne: true }
+            });
+        }
+
+        if (!txDoc) return null;
+
+        // Phase 2: atomically claim the credit flag — only one caller wins
+        const creditLocked = await Transaction.findOneAndUpdate(
+            { _id: txDoc._id, balanceCredited: { $ne: true } },
+            { $set: { balanceCredited: true } },
+            { new: true }
+        );
+
+        if (!creditLocked) return txDoc;
+
+        await User.findOneAndUpdate(
+            { userId: creditLocked.userId },
+            { $inc: { balance: Number(Number(creditLocked.credit).toFixed(2)) } }
+        );
+
+        console.log(`✅ Credited recharge ${txRef} (+${creditLocked.credit}) to user ${creditLocked.userId}`);
+        return creditLocked;
+    } catch (err) {
+        console.error(`creditRechargeTransaction error for ${txRef}:`, err);
+        return null;
     }
 }
 
@@ -1110,7 +1187,8 @@ app.post('/api/auth/register', async (req, res) => {
                 desc: 'Welcome Registration Bonus',
                 cost: 0,
                 credit: bonus,
-                status: 'Completed'
+                status: 'Completed',
+                balanceCredited: true
             });
         }
 
@@ -1172,7 +1250,8 @@ app.post('/api/wallet/recharge', requireAuth, async (req, res) => {
             desc: `Korapay Deposit - ${txRef}`,
             cost: 0,
             credit: Number(num.toFixed(2)),
-            status: 'Pending'
+            status: 'Pending',
+            balanceCredited: false
         });
 
         const state = await buildUserState(req.user);
@@ -1185,37 +1264,164 @@ app.post('/api/wallet/recharge', requireAuth, async (req, res) => {
 
 // --------------------------------------------------------------------
 // Korapay: Webhook for Deposit Confirmation
+// Korapay signs ONLY the `data` object (JSON.stringify(req.body.data)),
+// NOT the full raw body. We verify against the data-hash primarily and
+// fall back to the raw-body hash for compatibility with any future
+// payload shape change. Comparison uses timingSafeEqual.
 // --------------------------------------------------------------------
 app.post('/api/wallet/korapay-webhook', async (req, res) => {
     try {
-        const signature = req.headers['x-korapay-signature'];
-        const rawBody = req.rawBody || JSON.stringify(req.body);
-        const hash = crypto.createHmac('sha256', KORAPAY_SECRET_KEY).update(rawBody).digest('hex');
+        if (!KORAPAY_SECRET_KEY) {
+            console.error('[WEBHOOK] KORAPAY_SECRET_KEY missing — cannot verify signature.');
+            return res.status(500).send('Server misconfigured');
+        }
 
-        if (hash !== signature) {
+        const signature = req.headers['x-korapay-signature'];
+        if (!signature || !req.body || !req.body.data) {
+            return res.status(400).send('Invalid payload');
+        }
+
+        const dataHash = crypto
+            .createHmac('sha256', KORAPAY_SECRET_KEY)
+            .update(JSON.stringify(req.body.data))
+            .digest('hex');
+
+        const rawBody = req.rawBody || JSON.stringify(req.body);
+        const fullHash = crypto
+            .createHmac('sha256', KORAPAY_SECRET_KEY)
+            .update(rawBody)
+            .digest('hex');
+
+        const safeEqualHex = (a, b) => {
+            if (typeof a !== 'string' || typeof b !== 'string') return false;
+            if (a.length !== b.length) return false;
+            try {
+                return crypto.timingSafeEqual(Buffer.from(a, 'hex'), Buffer.from(b, 'hex'));
+            } catch (_) {
+                return false;
+            }
+        };
+
+        if (!safeEqualHex(signature, dataHash) && !safeEqualHex(signature, fullHash)) {
+            console.warn(`⚠️ Korapay webhook signature mismatch for ref: ${req.body?.data?.reference}`);
             return res.status(401).send('Invalid signature');
         }
 
         const { event, data } = req.body;
-        if (event === 'charge.success') {
-            const txRef = data.reference;
-            const txDoc = await Transaction.findOneAndUpdate(
-                { txId: txRef, type: 'RECHARGE', status: 'Pending' },
-                { $set: { status: 'Completed' } },
-                { new: true }
+        if (event === 'charge.success' && (data.status === 'success' || !data.status)) {
+            // Persist payload for audit (only if not yet Completed, so the
+            // payload that actually triggered crediting is retained).
+            await Transaction.updateOne(
+                { txId: data.reference, type: 'RECHARGE', status: { $ne: 'Completed' } },
+                {
+                    $set: {
+                        korapayReference: data.payment_reference || data.reference,
+                        korapayPayload: data
+                    }
+                }
             );
 
-            if (txDoc) {
-                await User.findOneAndUpdate(
-                    { userId: txDoc.userId },
-                    { $inc: { balance: Number(txDoc.credit.toFixed(2)) } }
-                );
+            // Amount sanity check — log mismatches, still credit the owed amount.
+            const existingTx = await Transaction.findOne({ txId: data.reference, type: 'RECHARGE' });
+            if (existingTx) {
+                const paid = Number(data.amount || 0);
+                const owed = Number(existingTx.credit || 0);
+                if (Number.isFinite(paid) && paid > 0 && Math.abs(paid - owed) > 0.5) {
+                    console.warn(`[WEBHOOK] Amount mismatch ref=${data.reference} paid=${paid} expected=${owed} — crediting expected.`);
+                }
             }
+
+            await creditRechargeTransaction(data.reference);
         }
+
         res.status(200).send('Webhook received');
     } catch (err) {
         console.error('Korapay Webhook Error:', err);
         res.status(500).send('Webhook error');
+    }
+});
+
+// --------------------------------------------------------------------
+// Korapay: Active Verification Endpoint (User-scoped)
+// Called on redirect back from Korapay (?reference=TX-...) or manually.
+// --------------------------------------------------------------------
+app.post('/api/wallet/verify-recharge', requireAuth, async (req, res) => {
+    try {
+        const { reference } = req.body;
+        const txRef = String(reference || '').trim();
+        if (!txRef) {
+            return res.status(400).json({ message: 'Transaction reference is required.' });
+        }
+
+        const existingTx = await Transaction.findOne({
+            txId: txRef,
+            type: 'RECHARGE',
+            userId: req.user.userId
+        });
+        if (!existingTx) {
+            return res.status(404).json({ message: 'Recharge transaction not found.' });
+        }
+
+        if (existingTx.status === 'Completed' && existingTx.balanceCredited) {
+            const freshUser = await User.findOne({ userId: req.user.userId });
+            const state = await buildUserState(freshUser);
+            return res.json({
+                verified: true,
+                alreadyCredited: true,
+                tx: formatTransaction(existingTx),
+                state
+            });
+        }
+
+        // Crash recovery: status Completed but credit flag never committed
+        if (existingTx.status === 'Completed' && !existingTx.balanceCredited) {
+            const creditedTx = await creditRechargeTransaction(txRef);
+            const freshUser = await User.findOne({ userId: req.user.userId });
+            const state = await buildUserState(freshUser);
+            return res.json({
+                verified: true,
+                recovered: true,
+                tx: formatTransaction(creditedTx || existingTx),
+                state
+            });
+        }
+
+        const koraRes = await fetch(
+            `https://api.korapay.com/merchant/api/v1/charges/${encodeURIComponent(txRef)}`,
+            {
+                method: 'GET',
+                headers: {
+                    'Authorization': `Bearer ${KORAPAY_SECRET_KEY}`,
+                    'Content-Type': 'application/json'
+                }
+            }
+        );
+
+        const koraData = await koraRes.json().catch(() => ({}));
+        const chargeStatus = koraData?.data?.status;
+
+        if (koraRes.ok && koraData.status && chargeStatus === 'success') {
+            const creditedTx = await creditRechargeTransaction(txRef);
+            const freshUser = await User.findOne({ userId: req.user.userId });
+            const state = await buildUserState(freshUser);
+            return res.json({
+                verified: true,
+                tx: formatTransaction(creditedTx || existingTx),
+                state
+            });
+        }
+
+        const freshUser = await User.findOne({ userId: req.user.userId });
+        const state = await buildUserState(freshUser);
+        return res.json({
+            verified: false,
+            chargeStatus: chargeStatus || 'pending',
+            message: `Payment status is currently '${chargeStatus || 'pending'}'.`,
+            state
+        });
+    } catch (err) {
+        console.error('Verify Recharge Error:', err);
+        res.status(500).json({ message: 'Failed to verify recharge status with Korapay.' });
     }
 });
 
@@ -1293,7 +1499,8 @@ app.post('/api/wallet/withdraw', requireAuth, async (req, res) => {
                 desc: `Withdrawal to ${bank.bankName} - ${bank.accountNumber} (${bank.accountName})`,
                 cost: Number(amount.toFixed(2)),
                 credit: 0,
-                status: 'Pending'
+                status: 'Pending',
+                balanceCredited: false
             });
         } catch (txErr) {
             await User.findOneAndUpdate(
@@ -1377,7 +1584,8 @@ app.post('/api/investments/purchase', requireAuth, async (req, res) => {
             desc: `Purchased Synthetic Plan: ${plan.name}`,
             cost: plan.cost,
             credit: 0,
-            status: 'Completed'
+            status: 'Completed',
+            balanceCredited: true
         });
 
         await distributeReferralCommission(updatedUser.userId, plan.cost);
@@ -1495,7 +1703,8 @@ app.post('/api/games/wheel/spin', requireAuth, async (req, res) => {
             desc: `Spin the Wheel (${winningSegment.label} Segment)`,
             cost,
             credit: prizeVal,
-            status: 'Credited'
+            status: 'Credited',
+            balanceCredited: true
         });
 
         const state = await buildUserState(updatedUser);
@@ -1652,7 +1861,8 @@ app.post('/api/games/slot/spin', requireAuth, async (req, res) => {
                 : `777 Jackpot Slot (No Match - ${winningPayout.label})`,
             cost,
             credit: prizeVal,
-            status: 'Credited'
+            status: 'Credited',
+            balanceCredited: true
         });
 
         const state = await buildUserState(updatedUser);
@@ -1736,7 +1946,8 @@ app.post('/api/games/mystery-box/open', requireAuth, async (req, res) => {
             desc: `${box.name} (${prizeObj.label})`,
             cost,
             credit: prizeVal,
-            status: 'Credited'
+            status: 'Credited',
+            balanceCredited: true
         });
 
         const state = await buildUserState(updatedUser);
@@ -1932,6 +2143,30 @@ app.post('/api/admin/withdrawals/:txId/reject', requireAuth, requireAdmin, async
         res.json({ tx: formatTransaction(txDoc), state });
     } catch (err) {
         res.status(500).json({ message: err.message });
+    }
+});
+
+// --------------------------------------------------------------------
+// Admin: Approve / Re-Verify a Stuck or Pending Recharge
+// --------------------------------------------------------------------
+app.post('/api/admin/recharges/:txId/approve', requireAuth, requireAdmin, async (req, res) => {
+    try {
+        const txRef = req.params.txId;
+        const txDoc = await Transaction.findOne({ txId: txRef, type: 'RECHARGE' });
+
+        if (!txDoc) {
+            return res.status(404).json({ message: 'Recharge transaction not found.' });
+        }
+        if (txDoc.status === 'Completed' && txDoc.balanceCredited) {
+            return res.status(400).json({ message: 'This recharge has already been credited.' });
+        }
+
+        const creditedTx = await creditRechargeTransaction(txRef);
+        const state = await buildUserState(req.user);
+        res.json({ tx: formatTransaction(creditedTx || txDoc), state });
+    } catch (err) {
+        console.error('Admin Approve Recharge Error:', err);
+        res.status(500).json({ message: 'Failed to approve recharge.' });
     }
 });
 
@@ -2421,7 +2656,8 @@ async function processMaturedInvestments() {
                     desc: `Synthetic Plan Maturity Payout: ${inv.planName}`,
                     cost: 0,
                     credit: inv.returnAmount,
-                    status: 'Completed'
+                    status: 'Completed',
+                    balanceCredited: true
                 });
             }
         }
@@ -2465,7 +2701,8 @@ async function processDailyPayouts() {
                     desc: `Daily ROI Payout (${lockedInv.completedPayouts}/${lockedInv.durationDays}) - ${lockedInv.planName}`,
                     cost: 0,
                     credit: lockedInv.dailyPayoutAmount,
-                    status: 'Completed'
+                    status: 'Completed',
+                    balanceCredited: true
                 });
 
                 if (lockedInv.completedPayouts >= lockedInv.durationDays || lockedInv.nextPayoutDate >= lockedInv.maturityDate) {
@@ -2490,6 +2727,7 @@ async function processExpiredRecharges() {
             {
                 type: 'RECHARGE',
                 status: 'Pending',
+                balanceCredited: { $ne: true },
                 createdAt: { $lte: oneHourAgo }
             },
             { $set: { status: 'Rejected' } }
@@ -2503,12 +2741,77 @@ async function processExpiredRecharges() {
     }
 }
 
+// --------------------------------------------------------------------
+// Korapay Reconciliation: rescues paid-but-stuck recharges without
+// requiring the user to return or the admin to click anything.
+//   Case 1 — Completed but uncredited (crash mid-write): credit now.
+//   Case 2 — Pending/Rejected: ask Korapay; credit if paid.
+// --------------------------------------------------------------------
+async function reconcileStaleRecharges() {
+    try {
+        if (!KORAPAY_SECRET_KEY) return;
+
+        // Case 1: crash-recovery (Completed + uncredited)
+        const uncredited = await Transaction.find({
+            type: 'RECHARGE',
+            status: 'Completed',
+            balanceCredited: false
+        }).limit(10);
+
+        for (const tx of uncredited) {
+            await creditRechargeTransaction(tx.txId);
+        }
+
+        // Case 2: stale Pending/Rejected — check Korapay directly
+        const stale = await Transaction.find({
+            type: 'RECHARGE',
+            status: { $in: ['Pending', 'Rejected'] },
+            balanceCredited: { $ne: true },
+            createdAt: { $gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) }
+        }).limit(20);
+
+        for (const tx of stale) {
+            try {
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 8000);
+                let koraData;
+                try {
+                    const r = await fetch(
+                        `https://api.korapay.com/merchant/api/v1/charges/${encodeURIComponent(tx.txId)}`,
+                        {
+                            headers: { 'Authorization': `Bearer ${KORAPAY_SECRET_KEY}` },
+                            signal: controller.signal
+                        }
+                    );
+                    koraData = await r.json().catch(() => ({}));
+                } finally {
+                    clearTimeout(timeoutId);
+                }
+
+                if (koraData?.data?.status === 'success') {
+                    await creditRechargeTransaction(tx.txId);
+                    console.log(`[RECONCILE] Rescued paid recharge ${tx.txId}`);
+                }
+
+                // Throttle to avoid hitting Korapay rate limits
+                await new Promise(resolve => setTimeout(resolve, 250));
+            } catch (e) {
+                // Network blip — retry next cycle, do not mark as failed
+            }
+        }
+    } catch (err) {
+        console.error('reconcileStaleRecharges error:', err.message);
+    }
+}
+
 // Check for matured synthetic plans every 60 seconds
 setInterval(processMaturedInvestments, 60 * 1000);
 // Check for daily ROI payouts every 60 seconds
 setInterval(processDailyPayouts, 60 * 1000);
 // Check for expired pending recharges every 5 minutes
 setInterval(processExpiredRecharges, 5 * 60 * 1000);
+// Reconcile stuck Korapay recharges every 5 minutes
+setInterval(reconcileStaleRecharges, 5 * 60 * 1000);
 
 // ====================================================================
 // 9. MONGODB ATLAS CONNECTION & SERVER STARTUP

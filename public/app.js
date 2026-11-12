@@ -326,6 +326,23 @@ const ApiClient = (() => {
             return data;
         },
 
+        verifyRecharge: async (reference) => {
+            const data = await apiRequest('/wallet/verify-recharge', {
+                method: 'POST',
+                body: JSON.stringify({ reference })
+            });
+            if (data.state) applyServerState(data.state);
+            return data;
+        },
+
+        adminApproveRecharge: async (txId) => {
+            const data = await apiRequest(`/admin/recharges/${encodeURIComponent(txId)}/approve`, {
+                method: 'POST'
+            });
+            if (data.state) applyServerState(data.state);
+            return data.tx;
+        },
+
         saveUserBankDetails: async (bankDetails) => {
             const data = await apiRequest('/user/bank-details', {
                 method: 'PUT',
@@ -2908,11 +2925,9 @@ const AppController = (() => {
                     </td>
                     <td class="py-3.5 px-4 text-xs text-stone-400">${tx.time}</td>
                     <td class="py-3.5 px-4 text-right">
-                        ${isPending
-                    ? `<span class="text-xs text-amber-500 font-bold">Awaiting Gateway</span>`
-                    : isRejected
-                        ? `<span class="text-xs text-rose-400 font-bold">Timeout</span>`
-                        : `<span class="text-xs text-stone-500">Verified</span>`}
+                        ${(isPending || isRejected)
+                    ? `<button onclick="AppController.adminApproveRecharge('${tx.id}')" class="px-2.5 py-1 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 text-xs font-bold">Approve &amp; Credit</button>`
+                    : `<span class="text-xs text-stone-500">Verified</span>`}
                     </td>
                 </tr>
             `;
@@ -3632,6 +3647,9 @@ const AppController = (() => {
             closeRechargeModal();
 
             if (response.checkoutUrl) {
+                if (response.tx?.id) {
+                    localStorage.setItem('lv_pending_recharge_ref', response.tx.id);
+                }
                 showToast(`Initializing Korapay secure checkout...`, 'info');
                 setTimeout(() => {
                     window.location.href = response.checkoutUrl;
@@ -3784,6 +3802,17 @@ const AppController = (() => {
             const curr = ApiClient.getState().settings.currency || '₦';
             const tx = await ApiClient.adminRejectWithdrawal(txId);
             showToast(`Withdrawal ${txId} rejected. ${curr}${Number(tx.cost).toFixed(2)} refunded to ${tx.user}.`, 'info');
+            syncAllViews();
+        } catch (err) {
+            showToast(err.message, 'error');
+        }
+    };
+
+    const adminApproveRecharge = async (txId) => {
+        try {
+            const curr = ApiClient.getState().settings.currency || '₦';
+            const tx = await ApiClient.adminApproveRecharge(txId);
+            showToast(`Recharge ${txId} (+${curr}${Number(tx.credit).toFixed(2)}) credited to ${tx.user}!`, 'success');
             syncAllViews();
         } catch (err) {
             showToast(err.message, 'error');
@@ -3960,6 +3989,29 @@ const AppController = (() => {
                 }, 100);
             }
 
+            // Capture a pending Korapay recharge reference (from URL or storage)
+            const returnedRef =
+                urlParams.get('reference') ||
+                urlParams.get('trxref') ||
+                localStorage.getItem('lv_pending_recharge_ref') ||
+                null;
+
+            // Clean checkout-related query params from the URL (preserve ?ref= etc.)
+            const cleanedParams = new URLSearchParams(window.location.search);
+            let hadCheckoutParam = false;
+            ['reference', 'trxref'].forEach(k => {
+                if (cleanedParams.has(k)) {
+                    cleanedParams.delete(k);
+                    hadCheckoutParam = true;
+                }
+            });
+            if (hadCheckoutParam) {
+                try {
+                    const qs = cleanedParams.toString();
+                    window.history.replaceState({}, document.title, window.location.pathname + (qs ? `?${qs}` : ''));
+                } catch (_) { }
+            }
+
             ensureSlotMachineDOM();
             ensureInvestmentDOM();
             ensureAdminChatDOM();
@@ -3991,6 +4043,28 @@ const AppController = (() => {
                 try {
                     const state = await ApiClient.fetchInitialState();
                     switchMainView(state.currentUser?.role === 'admin' ? 'admin' : 'player');
+
+                    if (returnedRef) {
+                        ApiClient.verifyRecharge(returnedRef).then((res) => {
+                            if (res && (res.verified || res.alreadyCredited || res.recovered)) {
+                                const curr = ApiClient.getState().settings.currency || '₦';
+                                const amount = Number(res.tx?.credit || 0);
+                                if (res.alreadyCredited) {
+                                    showToast(`Deposit already credited (+${curr}${amount.toFixed(2)}).`, 'info');
+                                } else {
+                                    ConfettiEngine.launch();
+                                    showToast(`Deposit verified! +${curr}${amount.toFixed(2)} credited to your balance.`, 'success');
+                                }
+                                syncAllViews();
+                            } else if (res && res.message) {
+                                showToast(res.message, 'info');
+                            }
+                            localStorage.removeItem('lv_pending_recharge_ref');
+                        }).catch(() => {
+                            // Network failure or 404 — leave ref for next visit; server reconcile also runs
+                        });
+                    }
+
                     startChatPolling();
                     return;
                 } catch (err) {
@@ -4031,6 +4105,7 @@ const AppController = (() => {
         adminToggleUserStatus,
         adminApproveWithdrawal,
         adminRejectWithdrawal,
+        adminApproveRecharge,
         saveWheelConfigFromAdmin,
         restoreReferenceWheel,
         toggleWheelAvailability,
