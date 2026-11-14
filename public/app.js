@@ -980,6 +980,7 @@ const ConfettiEngine = (() => {
 
     return { launch };
 })();
+
 /**
  * ====================================================================
  * LAYER 4: Main Application Controller & UI Renderer
@@ -996,6 +997,7 @@ const AppController = (() => {
     let pendingPurchasePlanId = null;
     let chatPollInterval = null;
     let pendingPasswordResetUser = null;
+    let isAdminSettingsDirty = false;
 
     // SVG Symbols for the 3-Reel 777 Jackpot Slot Machine
     const SLOT_SYMBOL_SVGS = {
@@ -1464,6 +1466,25 @@ const AppController = (() => {
         }
     };
 
+    /**
+     * Tracks unsaved edits in the Admin Settings tab so background state syncs
+     * never overwrite form fields or checkboxes while the admin is editing them.
+     */
+    const setupAdminSettingsListeners = () => {
+        const settingsSec = document.getElementById('admin-tab-settings');
+        if (!settingsSec || settingsSec.dataset.dirtyBound === 'true') return;
+        settingsSec.dataset.dirtyBound = 'true';
+
+        const markDirty = () => {
+            isAdminSettingsDirty = true;
+        };
+
+        settingsSec.querySelectorAll('input, select, textarea').forEach((el) => {
+            el.addEventListener('input', markDirty);
+            el.addEventListener('change', markDirty);
+        });
+    };
+
     const showToast = (message, type = 'success') => {
         const container = document.getElementById('toast-container');
         if (!container) return;
@@ -1907,6 +1928,7 @@ const AppController = (() => {
             }
         }
     };
+
     const purchaseInvestment = (planId) => {
         const state = ApiClient.getState();
         const plan = (state.investmentPlans || []).find(p => p.id === planId);
@@ -1993,6 +2015,7 @@ const AppController = (() => {
         ensureInvestmentDOM();
         ensureAdminChatDOM();
         setupPlayerChatWidget();
+        setupAdminSettingsListeners();
 
         const state = ApiClient.getState();
         const curr = state.settings.currency || '₦';
@@ -2226,8 +2249,8 @@ const AppController = (() => {
             renderAdminPortal();
         }
 
-        // Admin Settings panel: populate referral configurations
-        if (state.referralConfig) {
+        // Admin Settings panel: populate referral configurations only when admin has no unsaved edits
+        if (state.referralConfig && !isAdminSettingsDirty) {
             const setVal = (id, val) => {
                 const el = document.getElementById(id);
                 if (el && document.activeElement !== el) el.value = val;
@@ -2239,7 +2262,6 @@ const AppController = (() => {
             if (refCheck) refCheck.checked = Boolean(state.referralConfig.available);
         }
     };
-
     let countdownInterval = null;
 
     const startInvestmentCountdowns = () => {
@@ -2560,27 +2582,34 @@ const AppController = (() => {
             `).join('');
         }
 
-        const setVal = (id, val) => {
-            const el = document.getElementById(id);
-            if (el && document.activeElement !== el) el.value = val;
-        };
-        setVal('set-currency', state.settings.currency);
-        setVal('set-min-recharge', state.settings.minRecharge);
-        setVal('set-max-recharge', state.settings.maxRecharge);
-        setVal('set-min-withdrawal', state.settings.minWithdrawal ?? 1000);
-        setVal('set-reg-bonus', state.settings.regBonus);
+        setTxt('set-min-recharge-label', `Min Recharge (${curr})`);
+        setTxt('set-max-recharge-label', `Max Recharge (${curr})`);
+        setTxt('set-min-withdrawal-label', `Min Withdrawal (${curr})`);
+        setTxt('set-reg-bonus-label', `Registration Bonus (${curr})`);
 
-        const bank = state.settings.bankDetails || {};
-        setVal('set-bank-name', bank.bankName || '');
-        setVal('set-bank-account', bank.accountNumber || '');
-        setVal('set-bank-holder', bank.accountName || '');
+        if (!isAdminSettingsDirty) {
+            const setVal = (id, val) => {
+                const el = document.getElementById(id);
+                if (el && document.activeElement !== el) el.value = val;
+            };
+            setVal('set-currency', state.settings.currency);
+            setVal('set-min-recharge', state.settings.minRecharge);
+            setVal('set-max-recharge', state.settings.maxRecharge);
+            setVal('set-min-withdrawal', state.settings.minWithdrawal ?? 1000);
+            setVal('set-reg-bonus', state.settings.regBonus);
 
-        const maintCheck = document.getElementById('set-maintenance');
-        if (maintCheck) maintCheck.checked = Boolean(state.settings.maintenanceMode);
-        const confettiCheck = document.getElementById('set-confetti');
-        if (confettiCheck) confettiCheck.checked = Boolean(state.settings.enableConfetti);
-        const instantCheck = document.getElementById('set-instant-recharge');
-        if (instantCheck) instantCheck.checked = Boolean(state.settings.instantRechargeApproval);
+            const bank = state.settings.bankDetails || {};
+            setVal('set-bank-name', bank.bankName || '');
+            setVal('set-bank-account', bank.accountNumber || '');
+            setVal('set-bank-holder', bank.accountName || '');
+
+            const maintCheck = document.getElementById('set-maintenance');
+            if (maintCheck) maintCheck.checked = Boolean(state.settings.maintenanceMode);
+            const confettiCheck = document.getElementById('set-confetti');
+            if (confettiCheck) confettiCheck.checked = Boolean(state.settings.enableConfetti);
+            const instantCheck = document.getElementById('set-instant-recharge');
+            if (instantCheck) instantCheck.checked = Boolean(state.settings.instantRechargeApproval);
+        }
 
         renderAdminUsers();
         renderAdminWallets();
@@ -3370,6 +3399,10 @@ const AppController = (() => {
             view = 'player';
         }
 
+        if (view !== 'admin') {
+            isAdminSettingsDirty = false;
+        }
+
         currentMainView = view;
         ['auth', 'player', 'admin'].forEach(v => {
             const sec = document.getElementById(`view-${v}`);
@@ -3540,6 +3573,7 @@ const AppController = (() => {
         btn.innerHTML = `<i class="fa-solid fa-circle-notch fa-spin"></i><span>SIGNING IN...</span>`;
         try {
             const res = await ApiClient.authenticateUser(idVal, pwVal);
+            isAdminSettingsDirty = false;
             showToast(`Welcome back, ${res.user.name}!`, 'success');
             switchMainView(res.redirectRole === 'admin' ? 'admin' : 'player');
         } catch (err) {
@@ -3594,6 +3628,7 @@ const AppController = (() => {
     };
 
     const handleLogout = () => {
+        isAdminSettingsDirty = false;
         ApiClient.clearSession();
         showToast('Signed out successfully.', 'info');
         switchMainView('auth');
@@ -3933,12 +3968,20 @@ const AppController = (() => {
 
     const saveAppSettings = async () => {
         try {
+            const curState = ApiClient.getState().settings || {};
+            const parseNum = (id, fallback) => {
+                const raw = document.getElementById(id)?.value;
+                if (raw === undefined || raw === null || String(raw).trim() === '') return fallback;
+                const n = Number(raw);
+                return Number.isFinite(n) ? n : fallback;
+            };
+
             const settings = {
-                currency: document.getElementById('set-currency')?.value || '₦',
-                minRecharge: Number(document.getElementById('set-min-recharge')?.value) || 100,
-                maxRecharge: Number(document.getElementById('set-max-recharge')?.value) || 3000,
-                minWithdrawal: Math.max(0, Number(document.getElementById('set-min-withdrawal')?.value ?? 1000)),
-                regBonus: Math.max(0, Number(document.getElementById('set-reg-bonus')?.value ?? 0)),
+                currency: document.getElementById('set-currency')?.value.trim() || curState.currency || '₦',
+                minRecharge: Math.max(0, parseNum('set-min-recharge', curState.minRecharge ?? 1000)),
+                maxRecharge: Math.max(0, parseNum('set-max-recharge', curState.maxRecharge ?? 3000)),
+                minWithdrawal: Math.max(0, parseNum('set-min-withdrawal', curState.minWithdrawal ?? 1000)),
+                regBonus: Math.max(0, parseNum('set-reg-bonus', curState.regBonus ?? 0)),
                 instantRechargeApproval: Boolean(document.getElementById('set-instant-recharge')?.checked),
                 maintenanceMode: Boolean(document.getElementById('set-maintenance')?.checked),
                 enableConfetti: Boolean(document.getElementById('set-confetti')?.checked),
@@ -3950,11 +3993,12 @@ const AppController = (() => {
             };
             const referralConfig = {
                 available: Boolean(document.getElementById('set-ref-active')?.checked),
-                level1Percent: Number(document.getElementById('set-ref-lvl1')?.value || 0),
-                level2Percent: Number(document.getElementById('set-ref-lvl2')?.value || 0),
-                level3Percent: Number(document.getElementById('set-ref-lvl3')?.value || 0)
+                level1Percent: Math.max(0, parseNum('set-ref-lvl1', 0)),
+                level2Percent: Math.max(0, parseNum('set-ref-lvl2', 0)),
+                level3Percent: Math.max(0, parseNum('set-ref-lvl3', 0))
             };
             await ApiClient.saveAppSettings(settings, referralConfig);
+            isAdminSettingsDirty = false;
             showToast('Application settings saved.', 'success');
             syncAllViews();
         } catch (err) {
@@ -4016,6 +4060,7 @@ const AppController = (() => {
             ensureInvestmentDOM();
             ensureAdminChatDOM();
             setupPlayerChatWidget();
+            setupAdminSettingsListeners();
             window.addEventListener('resize', drawFortuneWheel);
 
             ToneLoader.load().catch(() => { });

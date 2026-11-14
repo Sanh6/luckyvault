@@ -591,23 +591,51 @@ async function initializePlatform() {
     } else {
         let needsMigration = false;
 
-        if (config.settings) {
-            if (config.settings.currency === '$') {
+        // Only initialize missing settings fields — never overwrite existing admin values
+        if (!config.settings) {
+            config.settings = {
+                currency: '₦',
+                minRecharge: 1000,
+                maxRecharge: 3000,
+                minWithdrawal: 1000,
+                regBonus: 0,
+                instantRechargeApproval: false,
+                maintenanceMode: false,
+                enableConfetti: true,
+                soundEnabled: true,
+                bankDetails: { bankName: 'Moniepoint MFB', accountNumber: '1234567890', accountName: 'LuckyVault Gaming' }
+            };
+            config.markModified('settings');
+            needsMigration = true;
+        } else {
+            let settingsUpdated = false;
+            if (config.settings.currency === undefined || config.settings.currency === null || config.settings.currency === '') {
                 config.settings.currency = '₦';
-                needsMigration = true;
+                settingsUpdated = true;
             }
-            if (config.settings.minRecharge !== 1000 || config.settings.maxRecharge !== 3000) {
+            if (config.settings.minRecharge === undefined || config.settings.minRecharge === null) {
                 config.settings.minRecharge = 1000;
+                settingsUpdated = true;
+            }
+            if (config.settings.maxRecharge === undefined || config.settings.maxRecharge === null) {
                 config.settings.maxRecharge = 3000;
-                needsMigration = true;
+                settingsUpdated = true;
             }
             if (config.settings.minWithdrawal === undefined || config.settings.minWithdrawal === null) {
                 config.settings.minWithdrawal = 1000;
-                needsMigration = true;
+                settingsUpdated = true;
                 console.log('✅ Migrated settings with minWithdrawal default (₦1000).');
+            }
+            if (config.settings.regBonus === undefined || config.settings.regBonus === null) {
+                config.settings.regBonus = 0;
+                settingsUpdated = true;
             }
             if (!config.settings.bankDetails) {
                 config.settings.bankDetails = { bankName: 'Moniepoint MFB', accountNumber: '1234567890', accountName: 'LuckyVault Gaming' };
+                settingsUpdated = true;
+            }
+            if (settingsUpdated) {
+                config.markModified('settings');
                 needsMigration = true;
             }
         }
@@ -648,23 +676,11 @@ async function initializePlatform() {
             console.log('✅ Sanitized & migrated mysteryState configuration.');
         }
 
-        if (config.wheelConfig) {
-            if (config.wheelConfig.spinCost < 250) {
-                config.wheelConfig.spinCost = 250.00;
-                needsMigration = true;
-                console.log('✅ Migrated wheel spin cost to new minimum ₦250.');
-            }
-            const hasOldSegments = config.wheelConfig.segments.some(seg =>
-                seg.label === '₦2000' || seg.label === '₦3000' ||
-                seg.value === 2000 || seg.value === 3000 ||
-                (seg.label && seg.label.startsWith('$'))
-            );
-
-            if (hasOldSegments) {
-                config.wheelConfig.segments = getReferenceWheelSegments();
-                needsMigration = true;
-                console.log('✅ Migrated wheel segments to update ₦2000 and ₦3000.');
-            }
+        if (!config.wheelConfig || !Array.isArray(config.wheelConfig.segments) || config.wheelConfig.segments.length === 0) {
+            config.wheelConfig = { available: true, spinCost: 250.00, segments: getReferenceWheelSegments() };
+            config.markModified('wheelConfig');
+            needsMigration = true;
+            console.log('✅ Initialized default Wheel configuration.');
         }
 
         if (!config.mysteryConfig || !Array.isArray(config.mysteryConfig.boxes) || config.mysteryConfig.boxes.length === 0) {
@@ -672,22 +688,6 @@ async function initializePlatform() {
             config.markModified('mysteryConfig');
             needsMigration = true;
             console.log('✅ Initialized default Mystery Boxes configuration.');
-        } else {
-            const expectedCosts = [200, 250, 300];
-            const expectedValues = [50, 100, 200, 300, 500, 1000, 5000];
-            const needsBoxMigration = config.mysteryConfig.boxes.some((box, idx) => {
-                if (Number(box.cost) !== expectedCosts[idx]) return true;
-                if (!Array.isArray(box.prizes) || box.prizes.length !== expectedValues.length) return true;
-                const boxVals = box.prizes.map(p => Number(p.value)).sort((a, b) => a - b);
-                return expectedValues.some((val, vIdx) => boxVals[vIdx] !== val) || box.prizes.some(p => Number(p.value) <= 0);
-            });
-
-            if (needsBoxMigration) {
-                config.mysteryConfig.boxes = getDefaultBoxes();
-                config.markModified('mysteryConfig');
-                needsMigration = true;
-                console.log('✅ Migrated Mystery Boxes to ₦200, ₦250, ₦300 costs and tiered rules.');
-            }
         }
 
         if (needsMigration) {
@@ -2198,6 +2198,7 @@ app.put('/api/admin/wheel', requireAuth, requireAdmin, async (req, res) => {
             }
         }
 
+        config.markModified('wheelConfig');
         ensureValidSpinState(config);
         ensureValidSlotState(config);
         ensureValidMysteryState(config);
@@ -2279,6 +2280,7 @@ app.put('/api/admin/mystery-boxes', requireAuth, requireAdmin, async (req, res) 
             }
         }
 
+        config.markModified('mysteryConfig');
         ensureValidSpinState(config);
         ensureValidSlotState(config);
         ensureValidMysteryState(config);
@@ -2310,22 +2312,64 @@ app.put('/api/admin/settings', requireAuth, requireAdmin, async (req, res) => {
         const { settings, referralConfig } = req.body;
         const config = await PlatformConfig.findOne({ singletonKey: 'GLOBAL_CONFIG' });
 
-        config.settings = {
-            ...config.settings.toObject(),
-            ...settings,
-            bankDetails: {
-                ...config.settings.bankDetails,
-                ...(settings?.bankDetails || {})
-            }
-        };
+        if (settings) {
+            const currentSettings = config.settings
+                ? (typeof config.settings.toObject === 'function' ? config.settings.toObject() : config.settings)
+                : {};
+            const currentBank = currentSettings.bankDetails || {};
+
+            config.settings = {
+                ...currentSettings,
+                currency: settings.currency !== undefined && String(settings.currency).trim() !== ''
+                    ? String(settings.currency).trim()
+                    : (currentSettings.currency || '₦'),
+                minRecharge: settings.minRecharge !== undefined && Number.isFinite(Number(settings.minRecharge))
+                    ? Math.max(0, Number(settings.minRecharge))
+                    : (currentSettings.minRecharge ?? 1000),
+                maxRecharge: settings.maxRecharge !== undefined && Number.isFinite(Number(settings.maxRecharge))
+                    ? Math.max(0, Number(settings.maxRecharge))
+                    : (currentSettings.maxRecharge ?? 3000),
+                minWithdrawal: settings.minWithdrawal !== undefined && Number.isFinite(Number(settings.minWithdrawal))
+                    ? Math.max(0, Number(settings.minWithdrawal))
+                    : (currentSettings.minWithdrawal ?? 1000),
+                regBonus: settings.regBonus !== undefined && Number.isFinite(Number(settings.regBonus))
+                    ? Math.max(0, Number(settings.regBonus))
+                    : (currentSettings.regBonus ?? 0),
+                instantRechargeApproval: settings.instantRechargeApproval !== undefined
+                    ? Boolean(settings.instantRechargeApproval)
+                    : Boolean(currentSettings.instantRechargeApproval),
+                maintenanceMode: settings.maintenanceMode !== undefined
+                    ? Boolean(settings.maintenanceMode)
+                    : Boolean(currentSettings.maintenanceMode),
+                enableConfetti: settings.enableConfetti !== undefined
+                    ? Boolean(settings.enableConfetti)
+                    : Boolean(currentSettings.enableConfetti),
+                soundEnabled: settings.soundEnabled !== undefined
+                    ? Boolean(settings.soundEnabled)
+                    : Boolean(currentSettings.soundEnabled ?? true),
+                bankDetails: {
+                    bankName: settings.bankDetails?.bankName !== undefined
+                        ? String(settings.bankDetails.bankName).trim()
+                        : (currentBank.bankName || ''),
+                    accountNumber: settings.bankDetails?.accountNumber !== undefined
+                        ? String(settings.bankDetails.accountNumber).trim()
+                        : (currentBank.accountNumber || ''),
+                    accountName: settings.bankDetails?.accountName !== undefined
+                        ? String(settings.bankDetails.accountName).trim()
+                        : (currentBank.accountName || '')
+                }
+            };
+            config.markModified('settings');
+        }
 
         if (referralConfig) {
             config.referralConfig = {
                 available: Boolean(referralConfig.available),
-                level1Percent: Number(referralConfig.level1Percent || 0),
-                level2Percent: Number(referralConfig.level2Percent || 0),
-                level3Percent: Number(referralConfig.level3Percent || 0)
+                level1Percent: Number.isFinite(Number(referralConfig.level1Percent)) ? Number(referralConfig.level1Percent) : 0,
+                level2Percent: Number.isFinite(Number(referralConfig.level2Percent)) ? Number(referralConfig.level2Percent) : 0,
+                level3Percent: Number.isFinite(Number(referralConfig.level3Percent)) ? Number(referralConfig.level3Percent) : 0
             };
+            config.markModified('referralConfig');
         }
 
         ensureValidSpinState(config);
