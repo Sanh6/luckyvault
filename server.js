@@ -2313,69 +2313,38 @@ app.put('/api/admin/settings', requireAuth, requireAdmin, async (req, res) => {
         const config = await PlatformConfig.findOne({ singletonKey: 'GLOBAL_CONFIG' });
 
         if (settings) {
-            const currentSettings = config.settings
-                ? (typeof config.settings.toObject === 'function' ? config.settings.toObject() : config.settings)
-                : {};
-            const currentBank = currentSettings.bankDetails || {};
+            // Assign fields individually so Mongoose accurately tracks and persists changes
+            if (settings.currency !== undefined) config.settings.currency = String(settings.currency).trim();
+            if (settings.minRecharge !== undefined) config.settings.minRecharge = Math.max(0, Number(settings.minRecharge));
+            if (settings.maxRecharge !== undefined) config.settings.maxRecharge = Math.max(0, Number(settings.maxRecharge));
+            if (settings.minWithdrawal !== undefined) config.settings.minWithdrawal = Math.max(0, Number(settings.minWithdrawal));
+            if (settings.regBonus !== undefined) config.settings.regBonus = Math.max(0, Number(settings.regBonus));
+            if (settings.instantRechargeApproval !== undefined) config.settings.instantRechargeApproval = Boolean(settings.instantRechargeApproval);
+            if (settings.maintenanceMode !== undefined) config.settings.maintenanceMode = Boolean(settings.maintenanceMode);
+            if (settings.enableConfetti !== undefined) config.settings.enableConfetti = Boolean(settings.enableConfetti);
+            if (settings.soundEnabled !== undefined) config.settings.soundEnabled = Boolean(settings.soundEnabled);
 
-            config.settings = {
-                ...currentSettings,
-                currency: settings.currency !== undefined && String(settings.currency).trim() !== ''
-                    ? String(settings.currency).trim()
-                    : (currentSettings.currency || '₦'),
-                minRecharge: settings.minRecharge !== undefined && Number.isFinite(Number(settings.minRecharge))
-                    ? Math.max(0, Number(settings.minRecharge))
-                    : (currentSettings.minRecharge ?? 1000),
-                maxRecharge: settings.maxRecharge !== undefined && Number.isFinite(Number(settings.maxRecharge))
-                    ? Math.max(0, Number(settings.maxRecharge))
-                    : (currentSettings.maxRecharge ?? 3000),
-                minWithdrawal: settings.minWithdrawal !== undefined && Number.isFinite(Number(settings.minWithdrawal))
-                    ? Math.max(0, Number(settings.minWithdrawal))
-                    : (currentSettings.minWithdrawal ?? 1000),
-                regBonus: settings.regBonus !== undefined && Number.isFinite(Number(settings.regBonus))
-                    ? Math.max(0, Number(settings.regBonus))
-                    : (currentSettings.regBonus ?? 0),
-                instantRechargeApproval: settings.instantRechargeApproval !== undefined
-                    ? Boolean(settings.instantRechargeApproval)
-                    : Boolean(currentSettings.instantRechargeApproval),
-                maintenanceMode: settings.maintenanceMode !== undefined
-                    ? Boolean(settings.maintenanceMode)
-                    : Boolean(currentSettings.maintenanceMode),
-                enableConfetti: settings.enableConfetti !== undefined
-                    ? Boolean(settings.enableConfetti)
-                    : Boolean(currentSettings.enableConfetti),
-                soundEnabled: settings.soundEnabled !== undefined
-                    ? Boolean(settings.soundEnabled)
-                    : Boolean(currentSettings.soundEnabled ?? true),
-                bankDetails: {
-                    bankName: settings.bankDetails?.bankName !== undefined
-                        ? String(settings.bankDetails.bankName).trim()
-                        : (currentBank.bankName || ''),
-                    accountNumber: settings.bankDetails?.accountNumber !== undefined
-                        ? String(settings.bankDetails.accountNumber).trim()
-                        : (currentBank.accountNumber || ''),
-                    accountName: settings.bankDetails?.accountName !== undefined
-                        ? String(settings.bankDetails.accountName).trim()
-                        : (currentBank.accountName || '')
-                }
-            };
-            config.markModified('settings');
+            if (settings.bankDetails) {
+                if (settings.bankDetails.bankName !== undefined) config.settings.bankDetails.bankName = String(settings.bankDetails.bankName).trim();
+                if (settings.bankDetails.accountNumber !== undefined) config.settings.bankDetails.accountNumber = String(settings.bankDetails.accountNumber).trim();
+                if (settings.bankDetails.accountName !== undefined) config.settings.bankDetails.accountName = String(settings.bankDetails.accountName).trim();
+            }
         }
 
         if (referralConfig) {
-            config.referralConfig = {
-                available: Boolean(referralConfig.available),
-                level1Percent: Number.isFinite(Number(referralConfig.level1Percent)) ? Number(referralConfig.level1Percent) : 0,
-                level2Percent: Number.isFinite(Number(referralConfig.level2Percent)) ? Number(referralConfig.level2Percent) : 0,
-                level3Percent: Number.isFinite(Number(referralConfig.level3Percent)) ? Number(referralConfig.level3Percent) : 0
-            };
-            config.markModified('referralConfig');
+            // Assign referral configs individually
+            if (referralConfig.available !== undefined) config.referralConfig.available = Boolean(referralConfig.available);
+            if (referralConfig.level1Percent !== undefined) config.referralConfig.level1Percent = Math.max(0, Number(referralConfig.level1Percent));
+            if (referralConfig.level2Percent !== undefined) config.referralConfig.level2Percent = Math.max(0, Number(referralConfig.level2Percent));
+            if (referralConfig.level3Percent !== undefined) config.referralConfig.level3Percent = Math.max(0, Number(referralConfig.level3Percent));
         }
 
+        // Keep standard validation hooks
         ensureValidSpinState(config);
         ensureValidSlotState(config);
         ensureValidMysteryState(config);
-        await config.save();
+
+        await config.save(); // The changes will now successfully persist to MongoDB
 
         const state = await buildUserState(req.user);
         res.json({ state });
